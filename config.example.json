@@ -1,0 +1,15 @@
+{
+  "icsUrl": null,
+  "manualEvents": [
+    { "title": "Flight to Tokyo",       "start": "2026-06-15T08:00:00Z", "pinned": true },
+    { "title": "Dentist appointment",   "start": "2026-06-10T14:30:00Z" },
+    { "title": "Product launch",        "start": "2026-07-01T17:00:00Z" },
+    { "title": "Birthday",              "start": "2026-09-12" },
+    { "title": "Wedding anniversary",   "start": "2026-10-22" },
+    { "title": "New Year's Eve party",  "start": "2026-12-31T20:00:00-05:00" },
+    { "title": "Tax filing deadline",   "start": "2027-04-15" }
+  ],
+  "pinnedEvents": ["Birthday", "Flight"],
+  "refreshSeconds": 60,
+  "life": { "birthDate": "1990-01-15", "expectancyYears": 80 }
+}
