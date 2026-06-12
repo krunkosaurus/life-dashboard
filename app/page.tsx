@@ -149,6 +149,15 @@ function UsagePanel({ title, data }: { title: string; data: UsageResult | null }
 }
 
 function ServersPanel({ data }: { data: ServersResult | null }) {
+  const total = data?.ok ? data.servers.length : 0;
+  const up = data?.ok ? data.servers.filter(s => s.online).length : 0;
+  const allUp = data?.ok === true && total > 0 && up === total;
+  // Collapsed when everything is healthy; auto-expands if a server goes down.
+  // A manual click overrides the default until the overall status flips again.
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
+  useEffect(() => { setUserExpanded(null); }, [allUp]);
+  const collapsed = userExpanded != null ? !userExpanded : allUp;
+
   if (!data) {
     return (
       <Panel title="Servers">
@@ -166,12 +175,12 @@ function ServersPanel({ data }: { data: ServersResult | null }) {
       </Panel>
     );
   }
-  const up = data.servers.filter(s => s.online).length;
-  const allUp = up === data.servers.length;
   return (
     <Panel
       title="Servers"
-      footer={<span style={{ color: allUp ? "#34d399" : "#ef4444" }}>{up}/{data.servers.length} online</span>}
+      collapsed={collapsed}
+      onToggle={() => setUserExpanded(collapsed)}
+      footer={<span style={{ color: allUp ? "#34d399" : "#ef4444" }}>{up}/{total} online</span>}
     >
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 }}>
         {data.servers.map(s => <ServerRow key={s.host} server={s} />)}
