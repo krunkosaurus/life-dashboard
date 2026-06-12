@@ -5,7 +5,7 @@ import { LimitGauge } from "@/components/LimitGauge";
 import { CountdownCard } from "@/components/CountdownCard";
 import { BirthdayCard } from "@/components/BirthdayCard";
 import { LifeBar } from "@/components/LifeBar";
-import type { EventsResult, LifeConfig, UsageFailure, UsageResult } from "@/lib/types";
+import type { EventsResult, LifeConfig, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
 
 const DEFAULT_REFRESH_MS = 60_000;
 // Snapshots older than this are treated as stale and the gauges are dimmed
@@ -39,19 +39,22 @@ export default function Page() {
   const [claude, setClaude] = useState<UsageResult | null>(null);
   const [codex, setCodex]   = useState<UsageResult | null>(null);
   const [events, setEvents] = useState<EventsResult | null>(null);
+  const [servers, setServers] = useState<ServersResult | null>(null);
   const [updated, setUpdated] = useState<number | null>(null);
   const [refreshMs, setRefreshMs] = useState(DEFAULT_REFRESH_MS);
   const [life, setLife] = useState<LifeConfig | null>(null);
 
   const refresh = useCallback(async () => {
-    const [c, x, e] = await Promise.all([
+    const [c, x, e, s] = await Promise.all([
       safeFetch<UsageResult>("/api/usage/claude"),
       safeFetch<UsageResult>("/api/usage/codex"),
       safeFetch<EventsResult>("/api/events"),
+      safeFetch<ServersResult>("/api/tailscale"),
     ]);
     setClaude(c as UsageResult);
     setCodex(x as UsageResult);
     setEvents(e as EventsResult);
+    setServers(s as ServersResult);
     setUpdated(Math.floor(Date.now() / 1000));
   }, []);
 
@@ -94,6 +97,8 @@ export default function Page() {
         <UsagePanel title="Claude Code" data={claude} />
         <UsagePanel title="Codex" data={codex} />
       </div>
+
+      <ServersPanel data={servers} />
 
       <section>
         <h2 style={{ margin: "0 0 12px", fontSize: 16, color: "#9aa6b8", fontWeight: 600 }}>Countdowns</h2>
@@ -140,6 +145,63 @@ function UsagePanel({ title, data }: { title: string; data: UsageResult | null }
       </div>
       <FailureLog failures={data.failures} />
     </Panel>
+  );
+}
+
+function ServersPanel({ data }: { data: ServersResult | null }) {
+  if (!data) {
+    return (
+      <Panel title="Servers">
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <SkeletonRow />
+          <SkeletonRow />
+        </div>
+      </Panel>
+    );
+  }
+  if (!data.ok) {
+    return (
+      <Panel title="Servers">
+        <Unavailable reason={data.error} />
+      </Panel>
+    );
+  }
+  const up = data.servers.filter(s => s.online).length;
+  const allUp = up === data.servers.length;
+  return (
+    <Panel
+      title="Servers"
+      footer={<span style={{ color: allUp ? "#34d399" : "#ef4444" }}>{up}/{data.servers.length} online</span>}
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 }}>
+        {data.servers.map(s => <ServerRow key={s.host} server={s} />)}
+      </div>
+    </Panel>
+  );
+}
+
+function ServerRow({ server: s }: { server: ServerStatus }) {
+  const now = Math.floor(Date.now() / 1000);
+  const status = !s.found
+    ? "not in tailnet"
+    : s.online
+    ? "online"
+    : s.lastSeen != null
+    ? `down · seen ${formatAge(Math.max(0, now - s.lastSeen))} ago`
+    : "down";
+  const color = s.online ? "#34d399" : s.found ? "#ef4444" : "#7a8595";
+  const shortHost = /^\d{1,3}(\.\d{1,3}){3}$/.test(s.host) ? s.host : s.host.split(".")[0];
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#0c1015", border: "1px solid #1c222b", borderRadius: 8, minWidth: 0 }}>
+      <span style={{ width: 9, height: 9, borderRadius: "50%", background: color, boxShadow: s.online ? "0 0 6px rgba(52, 211, 153, 0.7)" : "none", flexShrink: 0 }} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.alias}</div>
+        <div style={{ fontSize: 11, color: "#7a8595", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {shortHost !== s.alias && <>{shortHost} · </>}
+          <span style={{ color }}>{status}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 

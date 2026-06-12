@@ -11,5 +11,10 @@
   ],
   "pinnedEvents": ["Birthday", "Flight"],
   "refreshSeconds": 60,
-  "life": { "birthDate": "1990-01-15", "expectancyYears": 80 }
+  "life": { "birthDate": "1990-01-15", "expectancyYears": 80 },
+  "tailscaleHosts": [
+    { "host": "myserver", "alias": "Home server" },
+    { "host": "mybox.tailXXXXX.ts.net", "alias": "Office box" },
+    { "host": "100.64.0.1", "alias": "By IP" }
+  ]
 }

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AppConfig, BirthdayInput, LifeConfig, ManualEventInput } from "./types";
+import type { AppConfig, BirthdayInput, LifeConfig, ManualEventInput, TailscaleHostInput } from "./types";
 
 const DEFAULT_REFRESH = 60;
 const MIN_REFRESH = 5;
@@ -74,7 +74,18 @@ export function parseConfig(
     }
   }
 
-  return { icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life };
+  const tailscaleHosts: TailscaleHostInput[] = Array.isArray(file.tailscaleHosts)
+    ? file.tailscaleHosts.flatMap((h): TailscaleHostInput[] => {
+        if (!h || typeof h !== "object") return [];
+        const o = h as Record<string, unknown>;
+        if (typeof o.host !== "string" || o.host.trim() === "") return [];
+        const out: TailscaleHostInput = { host: o.host.trim() };
+        if (typeof o.alias === "string" && o.alias.trim() !== "") out.alias = o.alias.trim();
+        return [out];
+      })
+    : [];
+
+  return { icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life, tailscaleHosts };
 }
 
 export function loadConfig(): AppConfig {
