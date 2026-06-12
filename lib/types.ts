@@ -47,6 +47,24 @@ export type LifeConfig = {
   expectancyYears: number; // e.g. 80
 };
 
+export type TailscaleHostInput = {
+  host: string;   // bare hostname ("blackpi"), FQDN ("winton.tail87750.ts.net"), or Tailscale IP ("100.126.38.102")
+  alias?: string; // display name; falls back to host
+};
+
+export type ServerStatus = {
+  host: string;
+  alias: string;
+  online: boolean;
+  lastSeen: number | null; // unix seconds the peer was last seen; null when online or never reported
+  os?: string;
+  found: boolean; // false when the host isn't in the tailnet at all
+};
+
+export type ServersResult =
+  | { ok: true; servers: ServerStatus[]; checkedAt: number }
+  | { ok: false; error: string };
+
 export type AppConfig = {
   icsUrl: string | null;
   manualEvents: ManualEventInput[];
@@ -54,4 +72,5 @@ export type AppConfig = {
   pinnedEvents: string[];
   refreshSeconds: number;
   life: LifeConfig | null;
+  tailscaleHosts: TailscaleHostInput[];
 };

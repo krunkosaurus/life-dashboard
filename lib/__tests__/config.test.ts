@@ -65,6 +65,31 @@ describe("parseConfig", () => {
     expect(parseConfig({}, {}).manualEvents).toEqual([]);
   });
 
+  it("parses tailscaleHosts, trims values, drops malformed entries", () => {
+    const cfg = parseConfig(
+      {
+        tailscaleHosts: [
+          { host: "blackpi", alias: "Coldplunge" },
+          { host: " winton.tail87750.ts.net ", alias: "  PasirRis Winton " },
+          { host: "100.126.38.102" },
+          { host: "", alias: "empty" },   // empty host -> dropped
+          { alias: "no-host" },           // missing host -> dropped
+          "not-an-object",                // wrong type -> dropped
+        ],
+      },
+      {}
+    );
+    expect(cfg.tailscaleHosts).toEqual([
+      { host: "blackpi", alias: "Coldplunge" },
+      { host: "winton.tail87750.ts.net", alias: "PasirRis Winton" },
+      { host: "100.126.38.102" },
+    ]);
+  });
+
+  it("defaults tailscaleHosts to an empty array when missing", () => {
+    expect(parseConfig({}, {}).tailscaleHosts).toEqual([]);
+  });
+
   it("parses a valid life block", () => {
     const cfg = parseConfig(
       { life: { birthDate: "1990-01-15", expectancyYears: 80 } },
