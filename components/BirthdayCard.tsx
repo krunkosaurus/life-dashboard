@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { getMonthAccent } from "@/lib/monthColors";
 
 function pad(n: number) {
   return n.toString().padStart(2, " ");
@@ -44,21 +45,23 @@ export function BirthdayCard({ title, start, birthYear }: {
   const { d, h, m, s } = parts(remaining);
   const age = ageDecimal(start, birthYear, now);
   const nextAge = Math.floor(age) + 1;
+  const accent = getMonthAccent(new Date(start * 1000).getMonth());
 
   return (
     <article style={{
       background: "#11151b",
-      border: "1px solid #1c222b",
+      border: `1px solid ${accent.border}`,
       borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 8,
+      boxShadow: `inset 3px 0 0 ${accent.solid}`,
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
         <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</h3>
-        <span style={{ fontSize: 10, color: "#a78bfa", letterSpacing: 1, flexShrink: 0 }}>BDAY</span>
+        <span style={{ fontSize: 10, color: accent.text, letterSpacing: 1, flexShrink: 0 }}>BDAY</span>
       </div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: "#a78bfa", letterSpacing: 0.5 }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color: accent.solid, letterSpacing: 0.5 }}>
         {age.toFixed(1)}
       </div>
-      <div style={{ fontVariantNumeric: "tabular-nums", fontSize: 14, fontWeight: 600, color: "#c4b5fd", whiteSpace: "nowrap" }}>
+      <div style={{ fontVariantNumeric: "tabular-nums", fontSize: 14, fontWeight: 600, color: accent.text, whiteSpace: "nowrap" }}>
         {d}d {pad(h)}h {pad(m)}m {pad(s)}s → {nextAge}
       </div>
     </article>
