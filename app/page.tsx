@@ -3,8 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Panel } from "@/components/Panel";
 import { LimitGauge } from "@/components/LimitGauge";
 import { CountdownCard } from "@/components/CountdownCard";
+import { BirthdayCard } from "@/components/BirthdayCard";
 import { LifeBar } from "@/components/LifeBar";
-import type { EventsResult, LifeConfig, UsageResult } from "@/lib/types";
+import type { EventsResult, LifeConfig, UsageFailure, UsageResult } from "@/lib/types";
 
 const DEFAULT_REFRESH_MS = 60_000;
 // Snapshots older than this are treated as stale and the gauges are dimmed
@@ -104,7 +105,14 @@ export default function Page() {
 
 function UsagePanel({ title, data }: { title: string; data: UsageResult | null }) {
   if (!data) return <Panel title={title}><GaugeSkeleton /></Panel>;
-  if (!data.ok) return <Panel title={title}><Unavailable reason={data.error} /></Panel>;
+  if (!data.ok) {
+    return (
+      <Panel title={title}>
+        <Unavailable reason={data.error} />
+        <FailureLog failures={data.failures} />
+      </Panel>
+    );
+  }
   const ageSec =
     data.snapshotAt != null
       ? Math.max(0, Math.floor(Date.now() / 1000 - data.snapshotAt))
@@ -118,6 +126,11 @@ function UsagePanel({ title, data }: { title: string; data: UsageResult | null }
       {isStale && (
         <p style={{ color: "#f59e0b", fontSize: 13, margin: 0 }}>
           Snapshot is {formatAge(ageSec)} old — run {title} to refresh.
+          {data.staleReason && (
+            <span style={{ display: "block", color: "#7a8595", marginTop: 4 }}>
+              Last error: {data.staleReason}
+            </span>
+          )}
         </p>
       )}
       <div style={{ opacity: isStale ? 0.4 : 1, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -125,7 +138,33 @@ function UsagePanel({ title, data }: { title: string; data: UsageResult | null }
           <LimitGauge key={w.label} label={w.label} usedPercent={w.usedPercent} resetAt={w.resetAt} windowSecs={w.windowSecs} stale={isStale} />
         ))}
       </div>
+      <FailureLog failures={data.failures} />
     </Panel>
+  );
+}
+
+// Collapsed history of recent fetch failures for a usage source. Stays out of
+// the way when everything is healthy; expands to timestamped entries.
+function FailureLog({ failures }: { failures?: UsageFailure[] }) {
+  if (!failures || failures.length === 0) return null;
+  const now = Math.floor(Date.now() / 1000);
+  const count = failures.reduce((sum, f) => sum + f.count, 0);
+  return (
+    <details style={{ fontSize: 12, color: "#7a8595" }}>
+      <summary style={{ cursor: "pointer", userSelect: "none" }}>
+        ⚠ {count} recent fetch error{count === 1 ? "" : "s"}
+      </summary>
+      <ul style={{ margin: "8px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+        {[...failures].reverse().map(f => (
+          <li key={`${f.at}-${f.message}`} style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+            <span style={{ color: "#9aa6b8", whiteSpace: "nowrap" }}>
+              {formatAge(Math.max(0, now - f.at))} ago{f.count > 1 ? ` ×${f.count}` : ""}
+            </span>
+            <span style={{ wordBreak: "break-word" }}>{f.message}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -135,9 +174,13 @@ function EventsGrid({ data }: { data: EventsResult | null }) {
   if (data.events.length === 0) return <p style={{ color: "#7a8595", fontSize: 13 }}>No upcoming events.</p>;
   return (
     <div className="grid grid-3">
-      {data.events.slice(0, 9).map(e => (
-        <CountdownCard key={`${e.title}-${e.start}`} title={e.title} start={e.start} pinned={e.pinned} />
-      ))}
+      {data.events.slice(0, 9).map(e =>
+        e.birthYear != null ? (
+          <BirthdayCard key={`${e.title}-${e.start}`} title={e.title} start={e.start} birthYear={e.birthYear} />
+        ) : (
+          <CountdownCard key={`${e.title}-${e.start}`} title={e.title} start={e.start} pinned={e.pinned} />
+        )
+      )}
     </div>
   );
 }

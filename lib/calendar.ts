@@ -1,5 +1,5 @@
 import ical from "node-ical";
-import type { EventItem, EventsResult, ManualEventInput } from "./types";
+import type { BirthdayInput, EventItem, EventsResult, ManualEventInput } from "./types";
 
 export function parseEvents(icsText: string, pinned: string[], nowSec: number): EventItem[] {
   const data = ical.sync.parseICS(icsText);
@@ -52,6 +52,21 @@ export function parseManualEvents(items: ManualEventInput[], pinnedKeywords: str
   return out;
 }
 
+export function parseBirthdays(items: BirthdayInput[], nowSec: number): EventItem[] {
+  const nowMs = nowSec * 1000;
+  return items.map(b => {
+    const now = new Date(nowMs);
+    const year = now.getFullYear();
+    let candidate = new Date(year, b.month - 1, b.day, 8, 0, 0);
+    if (candidate.getTime() <= nowMs) {
+      candidate = new Date(year + 1, b.month - 1, b.day, 8, 0, 0);
+    }
+    const item: EventItem = { title: `${b.name}'s Birthday`, start: Math.floor(candidate.getTime() / 1000), pinned: false };
+    if (b.year != null) item.birthYear = b.year;
+    return item;
+  });
+}
+
 export function mergeEvents(a: EventItem[], b: EventItem[]): EventItem[] {
   const seen = new Set<string>();
   const merged: EventItem[] = [];
@@ -71,24 +86,25 @@ export function mergeEvents(a: EventItem[], b: EventItem[]): EventItem[] {
 export async function loadAllEvents(opts: {
   icsUrl: string | null;
   manualEvents: ManualEventInput[];
+  birthdays: BirthdayInput[];
   pinnedKeywords: string[];
 }): Promise<EventsResult> {
   const nowSec = Math.floor(Date.now() / 1000);
   const manual = parseManualEvents(opts.manualEvents, opts.pinnedKeywords, nowSec);
+  const bdays = parseBirthdays(opts.birthdays, nowSec);
+  const local = mergeEvents(manual, bdays);
 
   if (!opts.icsUrl) {
-    if (manual.length === 0 && opts.manualEvents.length === 0) {
+    if (local.length === 0 && opts.manualEvents.length === 0 && opts.birthdays.length === 0) {
       return { ok: false, error: "no events configured — set icsUrl or manualEvents in config.local.json" };
     }
-    return { ok: true, events: mergeEvents(manual, []) };
+    return { ok: true, events: local };
   }
 
   const ics = await fetchEvents(opts.icsUrl, opts.pinnedKeywords);
   if (!ics.ok) {
-    // If manual events exist, show them even when ICS fails; otherwise
-    // surface the ICS error.
-    if (manual.length > 0) return { ok: true, events: mergeEvents(manual, []) };
+    if (local.length > 0) return { ok: true, events: local };
     return ics;
   }
-  return { ok: true, events: mergeEvents(manual, ics.events) };
+  return { ok: true, events: mergeEvents(local, ics.events) };
 }

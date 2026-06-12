@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AppConfig, LifeConfig, ManualEventInput } from "./types";
+import type { AppConfig, BirthdayInput, LifeConfig, ManualEventInput } from "./types";
 
 const DEFAULT_REFRESH = 60;
 const MIN_REFRESH = 5;
@@ -42,6 +42,21 @@ export function parseConfig(
       })
     : [];
 
+  const birthdays: BirthdayInput[] = Array.isArray(file.birthdays)
+    ? file.birthdays.flatMap((b): BirthdayInput[] => {
+        if (!b || typeof b !== "object") return [];
+        const o = b as Record<string, unknown>;
+        if (typeof o.name !== "string") return [];
+        const month = typeof o.month === "number" ? o.month : NaN;
+        const day = typeof o.day === "number" ? o.day : NaN;
+        if (!Number.isFinite(month) || month < 1 || month > 12) return [];
+        if (!Number.isFinite(day) || day < 1 || day > 31) return [];
+        const out: BirthdayInput = { name: o.name, month, day };
+        if (typeof o.year === "number" && Number.isFinite(o.year)) out.year = o.year;
+        return [out];
+      })
+    : [];
+
   const refreshRaw =
     typeof file.refreshSeconds === "number" ? file.refreshSeconds : DEFAULT_REFRESH;
   const refreshSeconds = Math.max(MIN_REFRESH, Math.floor(refreshRaw));
@@ -59,7 +74,7 @@ export function parseConfig(
     }
   }
 
-  return { icsUrl, manualEvents, pinnedEvents, refreshSeconds, life };
+  return { icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life };
 }
 
 export function loadConfig(): AppConfig {

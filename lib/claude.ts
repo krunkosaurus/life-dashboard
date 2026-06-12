@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
-import type { UsageResult, UsageWindow } from "./types";
+import { recordFailure } from "./failures";
+import type { UsageFailure, UsageResult, UsageWindow } from "./types";
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const EXTRA_HEADERS: Record<string, string> = {
@@ -187,6 +188,20 @@ function loadStoredCreds(): StoredOauth | null {
 
 type TokenResult = { token: string } | { error: string; retryAfterMs?: number };
 
+// Refresh tokens rotate: after either this process or the Claude Code CLI
+// refreshes, only the most recently issued credential's refresh token is
+// guaranteed live. Try freshest-first (by expiresAt) and keep the older one
+// as a fallback in case the fresher one has been rotated out server-side.
+export function orderRefreshTokens(
+  mem: { refreshToken: string; expiresAt: number } | null,
+  stored: { refreshToken: string; expiresAt: number },
+): string[] {
+  const ordered = mem && mem.expiresAt > stored.expiresAt
+    ? [mem.refreshToken, stored.refreshToken]
+    : [stored.refreshToken, ...(mem ? [mem.refreshToken] : [])];
+  return [...new Set(ordered)];
+}
+
 async function getValidToken(): Promise<TokenResult> {
   // Use in-memory token if still valid.
   if (memToken && Date.now() < memToken.expiresAt - REFRESH_SKEW_MS) {
@@ -203,10 +218,27 @@ async function getValidToken(): Promise<TokenResult> {
     return { token: oauth.accessToken };
   }
 
-  // Token is expired (or near it) — refresh against the OAuth provider.
+  // Token is expired (or near it) — refresh against the OAuth provider,
+  // falling through to the next candidate when one is rejected outright.
+  let lastError = "no refresh token available";
+  for (const refreshToken of orderRefreshTokens(memToken, oauth)) {
+    const attempt = await refreshAccessToken(refreshToken);
+    if ("token" in attempt) return { token: attempt.token };
+    if (attempt.stop) return { error: attempt.error, retryAfterMs: attempt.retryAfterMs };
+    lastError = attempt.error;
+  }
+  return { error: lastError };
+}
+
+type RefreshAttempt =
+  | { token: string }
+  // stop: don't try further candidates (rate limit or network failure —
+  // neither is specific to the token that was sent).
+  | { error: string; stop: boolean; retryAfterMs?: number };
+
+async function refreshAccessToken(refreshToken: string): Promise<RefreshAttempt> {
   // RFC 6749 §3.2 requires application/x-www-form-urlencoded for token
   // endpoint requests; sending JSON returns HTTP 400 invalid_request.
-  const refreshToken = memToken?.refreshToken ?? oauth.refreshToken;
   try {
     const res = await fetch(REFRESH_URL, {
       method: "POST",
@@ -229,15 +261,17 @@ async function getValidToken(): Promise<TokenResult> {
       // stop hammering and making it worse.
       const ttl = parseRetryAfter(res.headers.get("Retry-After")) ?? RATELIMIT_TTL_MS;
       const retryAt = new Date(Date.now() + ttl).toLocaleTimeString();
-      return { error: `token refresh rate limited — retrying after ${retryAt}`, retryAfterMs: ttl };
+      return { error: `token refresh rate limited — retrying after ${retryAt}`, stop: true, retryAfterMs: ttl };
     }
     if (!res.ok) {
+      // Token-specific rejection (e.g. invalid_grant on a rotated-out
+      // refresh token) — let the caller try the next candidate.
       let detail = "";
       try { detail = describeError(await res.json()); } catch { /* not JSON */ }
-      return { error: `token refresh HTTP ${res.status}${detail}` };
+      return { error: `token refresh HTTP ${res.status}${detail}`, stop: false };
     }
     const body = (await res.json()) as { access_token?: string; refresh_token?: string; expires_in?: number };
-    if (!body.access_token || !body.expires_in) return { error: "malformed token refresh response" };
+    if (!body.access_token || !body.expires_in) return { error: "malformed token refresh response", stop: false };
     memToken = {
       accessToken: body.access_token,
       expiresAt: Date.now() + body.expires_in * 1000,
@@ -245,9 +279,15 @@ async function getValidToken(): Promise<TokenResult> {
     };
     return { token: memToken.accessToken };
   } catch (e) {
-    return { error: `token refresh failed: ${(e as Error).message}` };
+    // Network failure / timeout — not token-specific, so retrying the next
+    // candidate would just double the latency. Bail for this cycle.
+    return { error: `token refresh failed: ${(e as Error).message}`, stop: true };
   }
 }
+
+// Recent fetch failures, surfaced in the API payload so the UI can show a
+// small error history alongside the gauges. In-memory only; resets on restart.
+let failureLog: UsageFailure[] = [];
 
 async function doFetchClaudeUsage(): Promise<FetchResult> {
   const fresh = await fetchFresh();
@@ -257,22 +297,45 @@ async function doFetchClaudeUsage(): Promise<FetchResult> {
     // in memory and on disk (to survive restarts).
     lastGood = { atMs: Date.now(), windows: fresh.result.windows };
     persistLastGood(lastGood);
-    return fresh;
+    return withFailures(fresh);
   }
 
-  // Failure: if we have a recent successful snapshot, serve it with
-  // snapshotAt so the UI renders its stale treatment ("stale · Xm old").
-  // Keep the original error TTL so we don't bypass any back-off windows.
+  // Failure: log it — the stale fallback below otherwise hides the reason
+  // entirely, which makes outages undiagnosable from pm2 logs.
+  console.error(`[claude-usage] fetch failed: ${fresh.result.error}`);
+  failureLog = recordFailure(failureLog, fresh.result.error, Math.floor(Date.now() / 1000));
+
   // Seed from disk if this process hasn't fetched successfully yet (e.g. right
   // after a dev-server restart) so the dashboard shows stale data, not blank.
   if (!lastGood) lastGood = loadLastGoodFromDisk();
-  if (lastGood && Date.now() - lastGood.atMs < MAX_STALE_MS) {
-    return {
-      result: { ok: true, windows: lastGood.windows, snapshotAt: Math.floor(lastGood.atMs / 1000) },
-      ttl: fresh.ttl,
-    };
-  }
-  return fresh;
+  return withFailures(applyStaleFallback(fresh, lastGood, Date.now()));
+}
+
+function withFailures(fetch: FetchResult): FetchResult {
+  if (failureLog.length === 0) return fetch;
+  return { ...fetch, result: { ...fetch.result, failures: failureLog } };
+}
+
+// On failure, serve a recent successful snapshot with snapshotAt so the UI
+// renders its stale treatment ("stale · Xm old"), carrying the underlying
+// error as staleReason so the UI can say why. Keeps the original error TTL
+// so back-off windows aren't bypassed.
+export function applyStaleFallback(
+  fresh: FetchResult,
+  lastGood: LastGood | null,
+  nowMs: number,
+): FetchResult {
+  if (fresh.result.ok) return fresh;
+  if (!lastGood || nowMs - lastGood.atMs >= MAX_STALE_MS) return fresh;
+  return {
+    result: {
+      ok: true,
+      windows: lastGood.windows,
+      snapshotAt: Math.floor(lastGood.atMs / 1000),
+      staleReason: fresh.result.error,
+    },
+    ttl: fresh.ttl,
+  };
 }
 
 async function fetchFresh(): Promise<FetchResult> {

@@ -9,6 +9,7 @@ export async function GET() {
   const result = await loadAllEvents({
     icsUrl: cfg.icsUrl,
     manualEvents: cfg.manualEvents,
+    birthdays: cfg.birthdays,
     pinnedKeywords: cfg.pinnedEvents,
   });
   return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });

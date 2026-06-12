@@ -8,6 +8,8 @@ import {
   pickFreshestCreds,
   persistLastGood,
   loadLastGoodFromDisk,
+  orderRefreshTokens,
+  applyStaleFallback,
 } from "../claude";
 
 describe("normalizeClaudeUsage", () => {
@@ -44,6 +46,64 @@ describe("pickFreshestCreds", () => {
 
   it("ignores nulls among valid candidates", () => {
     expect(pickFreshestCreds([null, a, null])).toBe(a);
+  });
+});
+
+describe("orderRefreshTokens", () => {
+  const mem = { accessToken: "am", refreshToken: "rm", expiresAt: 2000 };
+  const stored = { accessToken: "as", refreshToken: "rs", expiresAt: 1000 };
+
+  it("tries the fresher credential's refresh token first", () => {
+    expect(orderRefreshTokens(mem, stored)).toEqual(["rm", "rs"]);
+  });
+
+  it("prefers the stored token when it is fresher than memory", () => {
+    expect(orderRefreshTokens({ ...mem, expiresAt: 500 }, stored)).toEqual(["rs", "rm"]);
+  });
+
+  it("dedupes identical refresh tokens", () => {
+    expect(orderRefreshTokens({ ...mem, refreshToken: "rs" }, stored)).toEqual(["rs"]);
+  });
+
+  it("handles a missing in-memory token", () => {
+    expect(orderRefreshTokens(null, stored)).toEqual(["rs"]);
+  });
+});
+
+describe("applyStaleFallback", () => {
+  const nowMs = 1_700_000_000_000;
+  const lastGood = {
+    atMs: nowMs - 3 * 3600_000, // 3h old — within the stale window
+    windows: [{ label: "weekly", usedPercent: 24, resetAt: 1_700_010_000, windowSecs: 604800 }],
+  };
+  const failed = {
+    result: { ok: false as const, error: "token refresh HTTP 400 (invalid_grant)" },
+    ttl: 300_000,
+  };
+
+  it("serves the recent snapshot with the failure reason attached", () => {
+    const out = applyStaleFallback(failed, lastGood, nowMs);
+    expect(out.ttl).toBe(300_000);
+    expect(out.result).toEqual({
+      ok: true,
+      windows: lastGood.windows,
+      snapshotAt: Math.floor(lastGood.atMs / 1000),
+      staleReason: "token refresh HTTP 400 (invalid_grant)",
+    });
+  });
+
+  it("returns the failure unchanged when the snapshot is too old", () => {
+    const ancient = { ...lastGood, atMs: nowMs - 8 * 24 * 3600_000 };
+    expect(applyStaleFallback(failed, ancient, nowMs)).toBe(failed);
+  });
+
+  it("returns the failure unchanged when there is no snapshot", () => {
+    expect(applyStaleFallback(failed, null, nowMs)).toBe(failed);
+  });
+
+  it("passes successful results through untouched", () => {
+    const okRes = { result: { ok: true as const, windows: lastGood.windows }, ttl: 90_000 };
+    expect(applyStaleFallback(okRes, lastGood, nowMs)).toBe(okRes);
   });
 });
 
