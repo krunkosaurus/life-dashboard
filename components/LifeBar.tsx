@@ -50,7 +50,10 @@ export function LifeBar({ life }: { life: LifeConfig }) {
           <span style={{ color: "#9aa6b8" }}>
             Year · {MONTHS[currentMonth]} {currentYear}
           </span>
-          <span><strong>{yearPct.toFixed(1)}%</strong> over</span>
+          <span style={{ textAlign: "right" }}>
+            <strong>{monthPct.toFixed(0)}%</strong> → month{" "}
+            <strong>{yearPct.toFixed(1)}%</strong> → year
+          </span>
         </div>
         <div
           aria-label={`${currentYear} progress by month`}
