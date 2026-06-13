@@ -5,7 +5,7 @@ import { LimitGauge } from "@/components/LimitGauge";
 import { CountdownCard } from "@/components/CountdownCard";
 import { BirthdayCard } from "@/components/BirthdayCard";
 import { LifeBar } from "@/components/LifeBar";
-import type { EventsResult, LifeConfig, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
+import type { EventItem, EventsResult, LifeConfig, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
 
 const DEFAULT_REFRESH_MS = 60_000;
 // Snapshots older than this are treated as stale and the gauges are dimmed
@@ -100,10 +100,7 @@ export default function Page() {
 
       <ServersPanel data={servers} />
 
-      <section>
-        <h2 style={{ margin: "0 0 12px", fontSize: 16, color: "#9aa6b8", fontWeight: 600 }}>Countdowns</h2>
-        <EventsGrid data={events} />
-      </section>
+      <EventPanels data={events} />
     </main>
   );
 }
@@ -239,14 +236,64 @@ function FailureLog({ failures }: { failures?: UsageFailure[] }) {
   );
 }
 
-function EventsGrid({ data }: { data: EventsResult | null }) {
-  if (!data) return <EventsSkeleton />;
-  if (!data.ok) return <Unavailable reason={data.error} />;
-  if (data.events.length === 0) return <p style={{ color: "#7a8595", fontSize: 13 }}>No upcoming events.</p>;
+function EventPanels({ data }: { data: EventsResult | null }) {
+  const [countdownsCollapsed, setCountdownsCollapsed] = useState(false);
+  const [anniversariesCollapsed, setAnniversariesCollapsed] = useState(false);
+  const countdowns = data?.ok ? data.events.filter(e => !isAnniversaryEvent(e)) : [];
+  const anniversaries = data?.ok ? data.events.filter(isAnniversaryEvent) : [];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <Panel
+        title="Countdowns"
+        collapsed={countdownsCollapsed}
+        onToggle={() => setCountdownsCollapsed(!countdownsCollapsed)}
+        footer={data?.ok ? `${countdowns.length} upcoming` : undefined}
+      >
+        <EventsGrid
+          events={countdowns}
+          loading={!data}
+          error={data && !data.ok ? data.error : null}
+          emptyText="No upcoming countdowns."
+          kind="countdown"
+        />
+      </Panel>
+      <Panel
+        title="Anniversaries"
+        collapsed={anniversariesCollapsed}
+        onToggle={() => setAnniversariesCollapsed(!anniversariesCollapsed)}
+        footer={data?.ok ? `${anniversaries.length} upcoming` : undefined}
+      >
+        <EventsGrid
+          events={anniversaries}
+          loading={!data}
+          error={data && !data.ok ? data.error : null}
+          emptyText="No upcoming anniversaries."
+          kind="anniversary"
+        />
+      </Panel>
+    </div>
+  );
+}
+
+function isAnniversaryEvent(event: EventItem): boolean {
+  return event.birthYear != null || /\b(birthday|anniversary)\b/i.test(event.title);
+}
+
+function EventsGrid({ events, loading, error, emptyText, kind }: {
+  events: EventItem[];
+  loading: boolean;
+  error: string | null;
+  emptyText: string;
+  kind: "countdown" | "anniversary";
+}) {
+  if (loading) return <EventsSkeleton />;
+  if (error) return <Unavailable reason={error} />;
+  if (events.length === 0) return <p style={{ color: "#7a8595", fontSize: 13, margin: 0 }}>{emptyText}</p>;
   return (
     <div className="grid grid-3">
-      {data.events.slice(0, 9).map(e =>
-        e.birthYear != null ? (
+      {events.slice(0, 9).map(e =>
+        kind === "anniversary" && e.birthYear != null ? (
           <BirthdayCard key={`${e.title}-${e.start}`} title={e.title} start={e.start} birthYear={e.birthYear} />
         ) : (
           <CountdownCard key={`${e.title}-${e.start}`} title={e.title} start={e.start} pinned={e.pinned} />
