@@ -65,6 +65,75 @@ export type ServersResult =
   | { ok: true; servers: ServerStatus[]; checkedAt: number }
   | { ok: false; error: string };
 
+// ---- Analytics: config-file (template) shape, produced by parseConfig ----
+
+// A live data source for a location: a JSON HTTP endpoint returning one row per
+// day. Everything is config-driven so no vendor specifics live in code. The
+// response may be a top-level array or `{ data: [...] }`; each row is an object
+// of `field` → value plus a date field (see `dateField`).
+export type AnalyticsSourceInput = {
+  api: string;                               // endpoint URL (required)
+  origin?: string;                           // sent as Origin/Referer — for APIs that key off it
+  params?: Record<string, string | number>; // query params appended to the URL
+  dateField?: string;                        // row field holding the day (default "date")
+};
+
+// A named series. Static mode supplies literal `values`; live mode names the
+// API row `field` to read per day. At least one of the two is required.
+export type AnalyticsSeriesInput = {
+  label: string;
+  values?: number[];
+  field?: string;
+};
+
+export type AnalyticsChartInput = {
+  title: string;
+  series: AnalyticsSeriesInput[];
+};
+
+export type AnalyticsLocationInput = {
+  name: string;
+  url?: string;                  // optional link to the source analytics page
+  source?: AnalyticsSourceInput; // present → fetch live; absent → use static values
+  charts: AnalyticsChartInput[];
+};
+
+export type AnalyticsConfig = {
+  title: string;                      // panel sub-title; defaults to "Analytics"
+  days: string[];                     // static x-axis labels; may be empty (live derives its own)
+  locations: AnalyticsLocationInput[];
+};
+
+// ---- Analytics: resolved (client-facing) shape, produced by getAnalytics ----
+
+// One numeric value per day in the enclosing AnalyticsResolved.days.
+export type AnalyticsSeries = {
+  label: string;
+  values: number[];
+};
+
+export type AnalyticsChart = {
+  title: string;
+  series: AnalyticsSeries[];
+};
+
+export type AnalyticsLocation = {
+  name: string;
+  url?: string;
+  charts: AnalyticsChart[];
+  error?: string; // set when a live fetch failed; charts is then empty
+};
+
+export type AnalyticsResolved = {
+  title: string;
+  days: string[];      // x-axis labels (e.g. ["Jun 8", …])
+  locations: AnalyticsLocation[];
+};
+
+export type AnalyticsResult =
+  | { ok: true; analytics: AnalyticsResolved }
+  | { ok: false; error: string };
+
 export type AppConfig = {
   icsUrl: string | null;
   manualEvents: ManualEventInput[];
@@ -73,4 +142,5 @@ export type AppConfig = {
   refreshSeconds: number;
   life: LifeConfig | null;
   tailscaleHosts: TailscaleHostInput[];
+  analytics: AnalyticsConfig | null; // parsed template; resolved by getAnalytics
 };

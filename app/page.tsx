@@ -5,7 +5,8 @@ import { LimitGauge } from "@/components/LimitGauge";
 import { CountdownCard } from "@/components/CountdownCard";
 import { BirthdayCard } from "@/components/BirthdayCard";
 import { LifeBar } from "@/components/LifeBar";
-import type { EventItem, EventsResult, LifeConfig, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
+import { AnalyticsPanel } from "@/components/AnalyticsPanel";
+import type { AnalyticsResult, EventItem, EventsResult, LifeConfig, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
 
 const DEFAULT_REFRESH_MS = 60_000;
 // Snapshots older than this are treated as stale and the gauges are dimmed
@@ -40,21 +41,24 @@ export default function Page() {
   const [codex, setCodex]   = useState<UsageResult | null>(null);
   const [events, setEvents] = useState<EventsResult | null>(null);
   const [servers, setServers] = useState<ServersResult | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsResult | null>(null);
   const [updated, setUpdated] = useState<number | null>(null);
   const [refreshMs, setRefreshMs] = useState(DEFAULT_REFRESH_MS);
   const [life, setLife] = useState<LifeConfig | null>(null);
 
   const refresh = useCallback(async () => {
-    const [c, x, e, s] = await Promise.all([
+    const [c, x, e, s, a] = await Promise.all([
       safeFetch<UsageResult>("/api/usage/claude"),
       safeFetch<UsageResult>("/api/usage/codex"),
       safeFetch<EventsResult>("/api/events"),
       safeFetch<ServersResult>("/api/tailscale"),
+      safeFetch<AnalyticsResult>("/api/analytics"),
     ]);
     setClaude(c as UsageResult);
     setCodex(x as UsageResult);
     setEvents(e as EventsResult);
     setServers(s as ServersResult);
+    setAnalytics(a as AnalyticsResult);
     setUpdated(Math.floor(Date.now() / 1000));
   }, []);
 
@@ -97,6 +101,8 @@ export default function Page() {
         <UsagePanel title="Claude Code" data={claude} />
         <UsagePanel title="Codex" data={codex} />
       </div>
+
+      <AnalyticsPanel data={analytics} />
 
       <ServersPanel data={servers} />
 

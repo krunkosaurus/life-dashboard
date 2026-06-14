@@ -1,6 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AppConfig, BirthdayInput, LifeConfig, ManualEventInput, TailscaleHostInput } from "./types";
+import type {
+  AnalyticsChartInput,
+  AnalyticsConfig,
+  AnalyticsLocationInput,
+  AnalyticsSeriesInput,
+  AnalyticsSourceInput,
+  AppConfig,
+  BirthdayInput,
+  LifeConfig,
+  ManualEventInput,
+  TailscaleHostInput,
+} from "./types";
 
 const DEFAULT_REFRESH = 60;
 const MIN_REFRESH = 5;
@@ -16,6 +27,89 @@ function isPlaceholder(url: string): boolean {
     url.includes("<paste") ||
     url.trim() === ""
   );
+}
+
+// A live source needs a non-empty `api` URL; without it the location falls back
+// to static values. `origin`, `params`, and `dateField` are optional.
+function parseAnalyticsSource(input: unknown): AnalyticsSourceInput | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const o = input as Record<string, unknown>;
+  if (typeof o.api !== "string" || o.api.trim() === "") return undefined;
+  const source: AnalyticsSourceInput = { api: o.api.trim() };
+  if (typeof o.origin === "string" && o.origin.trim() !== "") source.origin = o.origin.trim();
+  if (typeof o.dateField === "string" && o.dateField.trim() !== "") source.dateField = o.dateField.trim();
+  if (o.params && typeof o.params === "object" && !Array.isArray(o.params)) {
+    const params: Record<string, string | number> = {};
+    for (const [k, v] of Object.entries(o.params as Record<string, unknown>)) {
+      if (typeof v === "string" || typeof v === "number") params[k] = v;
+    }
+    if (Object.keys(params).length > 0) source.params = params;
+  }
+  return source;
+}
+
+// Validate an `analytics` block defensively, mirroring manualEvents/birthdays:
+// drop anything malformed and return null if nothing usable survives, so an
+// absent or broken block simply hides the panel rather than erroring.
+function parseAnalytics(input: unknown): AnalyticsConfig | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const o = input as Record<string, unknown>;
+
+  const locationsRaw = Array.isArray(o.locations) ? o.locations : [];
+  const locations: AnalyticsLocationInput[] = locationsRaw.flatMap((l): AnalyticsLocationInput[] => {
+    if (!l || typeof l !== "object") return [];
+    const lo = l as Record<string, unknown>;
+    if (typeof lo.name !== "string" || lo.name.trim() === "") return [];
+
+    const chartsRaw = Array.isArray(lo.charts) ? lo.charts : [];
+    const charts: AnalyticsChartInput[] = chartsRaw.flatMap((c): AnalyticsChartInput[] => {
+      if (!c || typeof c !== "object") return [];
+      const co = c as Record<string, unknown>;
+      if (typeof co.title !== "string" || co.title.trim() === "") return [];
+
+      const seriesRaw = Array.isArray(co.series) ? co.series : [];
+      const series: AnalyticsSeriesInput[] = seriesRaw.flatMap((s): AnalyticsSeriesInput[] => {
+        if (!s || typeof s !== "object") return [];
+        const so = s as Record<string, unknown>;
+        if (typeof so.label !== "string" || so.label.trim() === "") return [];
+        const out: AnalyticsSeriesInput = { label: so.label.trim() };
+        // Static mode: literal values (coerced to finite numbers).
+        if (Array.isArray(so.values) && so.values.length > 0) {
+          out.values = so.values.map(v => {
+            const n = typeof v === "number" ? v : Number(v);
+            return Number.isFinite(n) ? n : 0;
+          });
+        }
+        // Live mode: name the API field to read per day.
+        if (typeof so.field === "string" && so.field.trim() !== "") {
+          out.field = so.field.trim();
+        }
+        // A series needs at least one of the two to render anything.
+        if (out.values === undefined && out.field === undefined) return [];
+        return [out];
+      });
+
+      if (series.length === 0) return [];
+      return [{ title: co.title.trim(), series }];
+    });
+
+    if (charts.length === 0) return [];
+    const out: AnalyticsLocationInput = { name: lo.name.trim(), charts };
+    if (typeof lo.url === "string" && lo.url.trim() !== "") out.url = lo.url.trim();
+    const source = parseAnalyticsSource(lo.source);
+    if (source) out.source = source;
+    return [out];
+  });
+
+  if (locations.length === 0) return null;
+
+  const days = Array.isArray(o.days)
+    ? o.days.filter((d): d is string => typeof d === "string")
+    : [];
+  const title =
+    typeof o.title === "string" && o.title.trim() !== "" ? o.title.trim() : "Analytics";
+
+  return { title, days, locations };
 }
 
 export function parseConfig(
@@ -85,7 +179,9 @@ export function parseConfig(
       })
     : [];
 
-  return { icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life, tailscaleHosts };
+  const analytics = parseAnalytics(file.analytics);
+
+  return { icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life, tailscaleHosts, analytics };
 }
 
 export function loadConfig(): AppConfig {
