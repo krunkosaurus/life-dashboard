@@ -22,7 +22,8 @@ export type EventItem = {
   title: string;
   start: number;      // unix seconds
   pinned: boolean;
-  birthYear?: number; // set only for birthday events
+  sinceYear?: number; // origin year (birth/wedding/…); when set, a years-since count is shown
+  anniversaryType?: "birthday" | "anniversary"; // set for entries from the `birthdays` config
 };
 
 export type EventsResult =
@@ -39,7 +40,9 @@ export type BirthdayInput = {
   name: string;
   month: number;  // 1–12
   day: number;    // 1–31
-  year?: number;  // birth year, enables age display
+  year?: number;  // origin year (birth/wedding/…); enables the years-since count
+  type?: "birthday" | "anniversary"; // default "birthday"
+  label?: string; // optional title override (e.g. "Wedding"); else derived from name + type
 };
 
 export type LifeConfig = {

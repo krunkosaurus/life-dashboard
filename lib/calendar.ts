@@ -52,7 +52,7 @@ export function parseManualEvents(items: ManualEventInput[], pinnedKeywords: str
   return out;
 }
 
-export function parseBirthdays(items: BirthdayInput[], nowSec: number): EventItem[] {
+export function parseAnniversaries(items: BirthdayInput[], nowSec: number): EventItem[] {
   const nowMs = nowSec * 1000;
   return items.map(b => {
     const now = new Date(nowMs);
@@ -61,8 +61,15 @@ export function parseBirthdays(items: BirthdayInput[], nowSec: number): EventIte
     if (candidate.getTime() <= nowMs) {
       candidate = new Date(year + 1, b.month - 1, b.day, 8, 0, 0);
     }
-    const item: EventItem = { title: `${b.name}'s Birthday`, start: Math.floor(candidate.getTime() / 1000), pinned: false };
-    if (b.year != null) item.birthYear = b.year;
+    const type = b.type === "anniversary" ? "anniversary" : "birthday";
+    const title = b.label ?? (type === "birthday" ? `${b.name}'s Birthday` : b.name);
+    const item: EventItem = {
+      title,
+      start: Math.floor(candidate.getTime() / 1000),
+      pinned: false,
+      anniversaryType: type,
+    };
+    if (b.year != null) item.sinceYear = b.year;
     return item;
   });
 }
@@ -91,8 +98,8 @@ export async function loadAllEvents(opts: {
 }): Promise<EventsResult> {
   const nowSec = Math.floor(Date.now() / 1000);
   const manual = parseManualEvents(opts.manualEvents, opts.pinnedKeywords, nowSec);
-  const bdays = parseBirthdays(opts.birthdays, nowSec);
-  const local = mergeEvents(manual, bdays);
+  const annivs = parseAnniversaries(opts.birthdays, nowSec);
+  const local = mergeEvents(manual, annivs);
 
   if (!opts.icsUrl) {
     if (local.length === 0 && opts.manualEvents.length === 0 && opts.birthdays.length === 0) {
