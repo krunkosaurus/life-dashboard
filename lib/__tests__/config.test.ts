@@ -106,3 +106,177 @@ describe("parseConfig", () => {
     expect(parseConfig({ life: { birthDate: "1990-01-15" } }, {}).life).toBeNull();
   });
 });
+
+describe("parseConfig analytics", () => {
+  const valid = {
+    analytics: {
+      title: "Analytics",
+      days: ["Jun 8", "Jun 9", "Jun 10"],
+      locations: [
+        {
+          name: "Site A",
+          url: "https://site-a.example.com/admin/analytics",
+          charts: [
+            {
+              title: "Generation",
+              series: [
+                { label: "Batches", values: [1, 2, 3] },
+                { label: "Photos", values: [10, 20, 30] },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  it("parses a valid analytics block", () => {
+    expect(parseConfig(valid, {}).analytics).toEqual(valid.analytics);
+  });
+
+  it("defaults analytics to null when missing", () => {
+    expect(parseConfig({}, {}).analytics).toBeNull();
+  });
+
+  it('defaults the title to "Analytics" when absent or blank', () => {
+    const locations = valid.analytics.locations;
+    expect(parseConfig({ analytics: { locations } }, {}).analytics?.title).toBe("Analytics");
+    expect(parseConfig({ analytics: { title: "  ", locations } }, {}).analytics?.title).toBe("Analytics");
+  });
+
+  it("coerces non-finite series values to 0", () => {
+    const cfg = parseConfig(
+      {
+        analytics: {
+          locations: [
+            { name: "X", charts: [{ title: "C", series: [{ label: "S", values: [1, "bad", null, 4, NaN] }] }] },
+          ],
+        },
+      },
+      {}
+    );
+    expect(cfg.analytics?.locations[0].charts[0].series[0].values).toEqual([1, 0, 0, 4, 0]);
+  });
+
+  it("keeps only string day labels", () => {
+    const cfg = parseConfig(
+      { analytics: { days: ["Mon", 2, null, "Wed"], locations: valid.analytics.locations } },
+      {}
+    );
+    expect(cfg.analytics?.days).toEqual(["Mon", "Wed"]);
+  });
+
+  it("omits url when absent or blank", () => {
+    const cfg = parseConfig(
+      {
+        analytics: {
+          locations: [
+            { name: "NoUrl", charts: [{ title: "C", series: [{ label: "S", values: [1] }] }] },
+            { name: "BlankUrl", url: "  ", charts: [{ title: "C", series: [{ label: "S", values: [1] }] }] },
+          ],
+        },
+      },
+      {}
+    );
+    expect(cfg.analytics?.locations[0]).not.toHaveProperty("url");
+    expect(cfg.analytics?.locations[1]).not.toHaveProperty("url");
+  });
+
+  it("drops malformed locations, charts, and series", () => {
+    const cfg = parseConfig(
+      {
+        analytics: {
+          locations: [
+            "not-an-object",
+            { name: "", charts: [{ title: "C", series: [{ label: "S", values: [1] }] }] }, // blank name
+            { name: "NoCharts", charts: [] }, // no charts
+            { name: "BadChartOnly", charts: [{ title: "", series: [] }] }, // chart invalid -> location dropped
+            {
+              name: "Good",
+              charts: [
+                {
+                  title: "C",
+                  series: [
+                    { label: "ok", values: [1] },
+                    { label: "", values: [1] }, // blank label -> dropped
+                    { label: "novals", values: [] }, // empty values -> dropped
+                    { label: "notarray", values: "x" }, // non-array -> dropped
+                  ],
+                },
+                { title: "Empty", series: [] }, // no valid series -> chart dropped
+              ],
+            },
+          ],
+        },
+      },
+      {}
+    );
+    expect(cfg.analytics?.locations).toHaveLength(1);
+    expect(cfg.analytics?.locations[0].name).toBe("Good");
+    expect(cfg.analytics?.locations[0].charts).toHaveLength(1);
+    expect(cfg.analytics?.locations[0].charts[0].series).toEqual([{ label: "ok", values: [1] }]);
+  });
+
+  it("returns null when nothing survives validation", () => {
+    expect(parseConfig({ analytics: "nope" }, {}).analytics).toBeNull();
+    expect(parseConfig({ analytics: { locations: "nope" } }, {}).analytics).toBeNull();
+    expect(parseConfig({ analytics: { locations: [{ name: "x", charts: [] }] } }, {}).analytics).toBeNull();
+  });
+
+  it("parses a live source with api, origin, params and dateField", () => {
+    const cfg = parseConfig(
+      {
+        analytics: {
+          locations: [
+            {
+              name: "Site A",
+              url: "https://a.example.com/admin/analytics",
+              source: {
+                api: "https://api.example.com/historical",
+                origin: "https://a.example.com",
+                params: { days: 7, theme: "a" },
+                dateField: "day",
+              },
+              charts: [{ title: "Generation", series: [{ label: "Batches", field: "batches" }] }],
+            },
+          ],
+        },
+      },
+      {}
+    );
+    expect(cfg.analytics?.locations[0].source).toEqual({
+      api: "https://api.example.com/historical",
+      origin: "https://a.example.com",
+      params: { days: 7, theme: "a" },
+      dateField: "day",
+    });
+    expect(cfg.analytics?.locations[0].charts[0].series[0]).toEqual({ label: "Batches", field: "batches" });
+  });
+
+  it("drops a source without an api url and trims field names", () => {
+    const cfg = parseConfig(
+      {
+        analytics: {
+          locations: [
+            {
+              name: "X",
+              source: { origin: "https://x.example.com" }, // no api -> source dropped
+              charts: [{ title: "C", series: [{ label: "S", field: "  f  " }] }],
+            },
+          ],
+        },
+      },
+      {}
+    );
+    expect(cfg.analytics?.locations[0]).not.toHaveProperty("source");
+    expect(cfg.analytics?.locations[0].charts[0].series[0]).toEqual({ label: "S", field: "f" });
+  });
+
+  it("keeps a series valid when it has a field but no values", () => {
+    const cfg = parseConfig(
+      { analytics: { locations: [{ name: "X", charts: [{ title: "C", series: [{ label: "S", field: "f" }] }] }] } },
+      {}
+    );
+    expect(cfg.analytics?.locations[0].charts[0].series).toEqual([{ label: "S", field: "f" }]);
+  });
+});

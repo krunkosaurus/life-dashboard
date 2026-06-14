@@ -7,6 +7,9 @@ A self-hosted personal dashboard. At a glance it shows:
   by month, with the live month filling in real time.
 - **AI usage limits** — live Claude Code and Codex rate-limit gauges (5h + weekly
   windows) with reset countdowns.
+- **Analytics** — grouped bar charts of recent daily metrics per location (e.g.
+  batches/photos generated and prints requested/completed), driven entirely by
+  numbers you keep in config.
 - **Servers** — online/offline status of your Tailscale machines.
 - **Countdowns & Anniversaries** — upcoming calendar events and recurring
   birthdays, split into two panels.
@@ -132,6 +135,92 @@ Status is read from `tailscale status --json`, which reflects the **control
 plane's** view of each peer — so it works even when this host can't directly
 route to the machine. The Servers panel collapses automatically when everything
 is online and auto-expands the moment a server goes down.
+
+### Analytics (charts)
+
+**`analytics`** powers the charts panel. It's fully config-driven — the dashboard
+renders whatever daily datapoints you put here, so the grouping and labels are
+yours to define:
+
+```json
+"analytics": {
+  "title": "Analytics",
+  "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+  "locations": [
+    {
+      "name": "Site A",
+      "url": "https://site-a.example.com/admin/analytics",
+      "charts": [
+        { "title": "Generation", "series": [
+          { "label": "Batches", "values": [40, 52, 38, 61, 75, 58, 49] },
+          { "label": "Photos",  "values": [320, 410, 300, 520, 640, 470, 390] }
+        ]},
+        { "title": "Prints", "series": [
+          { "label": "Requested", "values": [18, 24, 15, 29, 33, 21, 19] },
+          { "label": "Completed", "values": [17, 22, 15, 27, 31, 20, 18] }
+        ]}
+      ]
+    }
+  ]
+}
+```
+
+- `title` — panel heading (defaults to `"Analytics"`).
+- `days` — x-axis labels, one per data point (e.g. the last 7 days).
+- `locations` — each is `{ name, url?, charts }`. `url` (optional) adds a "source"
+  link. Each location renders its charts side by side.
+- `charts` — each is `{ title, series }`. Every chart draws its series as grouped
+  bars across the days, with a per-series total in the legend. Two series per chart
+  (a natural pair) reads best, but any number works.
+
+Each **series** is one of two modes:
+
+- **Static** — `{ label, values }`, where `values` is one number per `day`. Good
+  for hand-maintained snapshots; this is what `config.example.json` ships.
+- **Live** — `{ label, field }`, used together with a location-level `source`. The
+  dashboard fetches the data on each refresh and reads `field` from each daily row.
+
+To pull live data, add a `source` to the location and switch its series to `field`:
+
+```json
+{
+  "name": "Site A",
+  "url": "https://site-a.example.com/admin/analytics",
+  "source": {
+    "api": "https://api.example.com/analytics/historical",
+    "origin": "https://site-a.example.com",
+    "params": { "days": 7 }
+  },
+  "charts": [
+    { "title": "Generation", "series": [
+      { "label": "Batches", "field": "batches" },
+      { "label": "Photos",  "field": "photos" }
+    ]},
+    { "title": "Prints", "series": [
+      { "label": "Requested", "field": "requested" },
+      { "label": "Completed", "field": "completed" }
+    ]}
+  ]
+}
+```
+
+The `source` describes any JSON HTTP endpoint that returns one row per day
+(either a top-level array or `{ "data": [ … ] }`):
+
+- `source.api` (required) — the endpoint URL.
+- `source.origin` (optional) — sent as the request's `Origin`/`Referer` header.
+  Use it for APIs that return different data per calling origin.
+- `source.params` (optional) — query params appended to the URL, e.g.
+  `{ "days": 7 }`.
+- `source.dateField` (optional) — the row property holding the day; defaults to
+  `"date"`.
+- Series then use `field` (the row property to read each day) instead of
+  `values`; the day labels come from each row's date field. Results are cached
+  briefly server-side. If a location's fetch fails, that location shows an
+  "Unavailable" message while the others keep rendering.
+
+Malformed entries are dropped defensively, and non-numeric values become `0`.
+Omit `analytics` entirely to hide the panel.
 
 ### Refresh
 

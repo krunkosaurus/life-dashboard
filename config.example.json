@@ -16,5 +16,39 @@
     { "host": "myserver", "alias": "Home server" },
     { "host": "mybox.tailXXXXX.ts.net", "alias": "Office box" },
     { "host": "100.64.0.1", "alias": "By IP" }
-  ]
+  ],
+  "analytics": {
+    "title": "Analytics",
+    "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    "locations": [
+      {
+        "name": "Studio A",
+        "url": "https://studio-a.example.com/admin/analytics",
+        "charts": [
+          { "title": "Generation", "series": [
+            { "label": "Batches", "values": [40, 52, 38, 61, 75, 58, 49] },
+            { "label": "Photos",  "values": [320, 410, 300, 520, 640, 470, 390] }
+          ]},
+          { "title": "Prints", "series": [
+            { "label": "Requested", "values": [18, 24, 15, 29, 33, 21, 19] },
+            { "label": "Completed", "values": [17, 22, 15, 27, 31, 20, 18] }
+          ]}
+        ]
+      },
+      {
+        "name": "Studio B",
+        "url": "https://studio-b.example.com/admin/analytics",
+        "charts": [
+          { "title": "Generation", "series": [
+            { "label": "Batches", "values": [22, 30, 19, 28, 41, 35, 27] },
+            { "label": "Photos",  "values": [180, 250, 160, 240, 360, 300, 220] }
+          ]},
+          { "title": "Prints", "series": [
+            { "label": "Requested", "values": [9, 14, 7, 12, 19, 15, 11] },
+            { "label": "Completed", "values": [8, 13, 7, 11, 18, 14, 10] }
+          ]}
+        ]
+      }
+    ]
+  }
 }
