@@ -12,7 +12,7 @@ A self-hosted personal dashboard. At a glance it shows:
   numbers you keep in config.
 - **Servers** — online/offline status of your Tailscale machines.
 - **Countdowns & Anniversaries** — upcoming calendar events and recurring
-  birthdays, split into two panels.
+  birthdays/anniversaries, split into two panels (each ordered soonest-first).
 
 Everything reads from a single `config.local.json`. Sections you don't configure
 are simply omitted.
@@ -63,7 +63,8 @@ panel.
   ],
   "birthdays": [
     { "name": "Ada",   "month": 12, "day": 10, "year": 1815 },
-    { "name": "Grace", "month": 12, "day": 9 }
+    { "name": "Grace", "month": 12, "day": 9 },
+    { "name": "Ada & Charles", "type": "anniversary", "label": "Wedding", "month": 7, "day": 8, "year": 1835 }
   ],
   "pinnedEvents": ["Flight"],
   "refreshSeconds": 60,
@@ -98,19 +99,25 @@ title contains one of them (case-insensitive substring) is pinned.
 Events are split into two panels on the dashboard:
 
 - **Countdowns** — everything else.
-- **Anniversaries** — birthdays (see below) and any event whose title contains
-  "birthday" or "anniversary".
+- **Anniversaries** — `birthdays`/anniversaries (see below) and any event whose
+  title contains "birthday" or "anniversary".
 
-Both panels are collapsible.
+Each panel is ordered soonest-ending first (pinned events kept on top). Both
+panels are collapsible.
 
-### Birthdays
+### Birthdays & anniversaries
 
 **`birthdays`** are recurring annual events, rendered in the Anniversaries panel:
 
-- `name`, `month` (1–12), `day` (1–31) are required; `year` (birth year) is
-  optional and, when present, shows the upcoming age.
-- Each birthday automatically rolls to its next occurrence, so it's always a
-  countdown to the next one.
+- `name`, `month` (1–12), `day` (1–31) are required. Each entry automatically
+  rolls to its next occurrence, so it's always a countdown to the next one.
+- `type` is `"birthday"` (default) or `"anniversary"`. Birthdays title as
+  *"<name>'s Birthday"* and show a `BDAY` badge; anniversaries title as the
+  `name` and show an `ANNIV` badge — so not everything is assumed to be a birthday.
+- `label` (optional) overrides the title outright, e.g. `"Wedding"`.
+- `year` (optional) is the origin year — birth year, wedding year, etc. When
+  present the card shows the upcoming count of years elapsed (the age, for a
+  birthday); when omitted it shows just the countdown and date.
 
 ### Life progress
 

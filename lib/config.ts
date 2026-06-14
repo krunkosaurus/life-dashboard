@@ -147,6 +147,8 @@ export function parseConfig(
         if (!Number.isFinite(day) || day < 1 || day > 31) return [];
         const out: BirthdayInput = { name: o.name, month, day };
         if (typeof o.year === "number" && Number.isFinite(o.year)) out.year = o.year;
+        if (o.type === "anniversary" || o.type === "birthday") out.type = o.type;
+        if (typeof o.label === "string") out.label = o.label;
         return [out];
       })
     : [];

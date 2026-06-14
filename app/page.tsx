@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Panel } from "@/components/Panel";
 import { LimitGauge } from "@/components/LimitGauge";
 import { CountdownCard } from "@/components/CountdownCard";
-import { BirthdayCard } from "@/components/BirthdayCard";
+import { AnniversaryCard } from "@/components/AnniversaryCard";
 import { LifeBar } from "@/components/LifeBar";
 import { AnalyticsPanel } from "@/components/AnalyticsPanel";
 import type { AnalyticsResult, EventItem, EventsResult, LifeConfig, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
@@ -245,8 +245,23 @@ function FailureLog({ failures }: { failures?: UsageFailure[] }) {
 function EventPanels({ data }: { data: EventsResult | null }) {
   const [countdownsCollapsed, setCountdownsCollapsed] = useState(false);
   const [anniversariesCollapsed, setAnniversariesCollapsed] = useState(false);
-  const countdowns = data?.ok ? data.events.filter(e => !isAnniversaryEvent(e)) : [];
-  const anniversaries = data?.ok ? data.events.filter(isAnniversaryEvent) : [];
+  // Countdowns are one-off, so order by which finishes soonest. Anniversaries
+  // recur every year, so order them by their upcoming year milestone (turning 4,
+  // turning 44, …) with the longest last; entries without an origin year have no
+  // milestone and fall to the end by calendar date. Pinned kept on top in both.
+  const byPinnedThenSoonest = (a: EventItem, b: EventItem) =>
+    a.pinned !== b.pinned ? (a.pinned ? -1 : 1) : a.start - b.start;
+  const milestone = (e: EventItem) =>
+    e.sinceYear != null ? new Date(e.start * 1000).getFullYear() - e.sinceYear : Infinity;
+  const byPinnedThenMilestone = (a: EventItem, b: EventItem) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    const ma = milestone(a), mb = milestone(b);
+    if (ma !== mb) return ma - mb;
+    const da = new Date(a.start * 1000), db = new Date(b.start * 1000);
+    return da.getMonth() - db.getMonth() || da.getDate() - db.getDate();
+  };
+  const countdowns = data?.ok ? data.events.filter(e => !isAnniversaryEvent(e)).sort(byPinnedThenSoonest) : [];
+  const anniversaries = data?.ok ? data.events.filter(isAnniversaryEvent).sort(byPinnedThenMilestone) : [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -283,7 +298,7 @@ function EventPanels({ data }: { data: EventsResult | null }) {
 }
 
 function isAnniversaryEvent(event: EventItem): boolean {
-  return event.birthYear != null || /\b(birthday|anniversary)\b/i.test(event.title);
+  return event.anniversaryType != null || event.sinceYear != null || /\b(birthday|anniversary)\b/i.test(event.title);
 }
 
 function EventsGrid({ events, loading, error, emptyText, kind }: {
@@ -299,8 +314,14 @@ function EventsGrid({ events, loading, error, emptyText, kind }: {
   return (
     <div className="grid grid-3">
       {events.slice(0, 9).map(e =>
-        kind === "anniversary" && e.birthYear != null ? (
-          <BirthdayCard key={`${e.title}-${e.start}`} title={e.title} start={e.start} birthYear={e.birthYear} />
+        kind === "anniversary" ? (
+          <AnniversaryCard
+            key={`${e.title}-${e.start}`}
+            title={e.title}
+            start={e.start}
+            sinceYear={e.sinceYear}
+            type={e.anniversaryType ?? (/\bbirthday\b/i.test(e.title) ? "birthday" : "anniversary")}
+          />
         ) : (
           <CountdownCard key={`${e.title}-${e.start}`} title={e.title} start={e.start} pinned={e.pinned} />
         )
