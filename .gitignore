@@ -8,3 +8,6 @@ next-env.d.ts
 *.tsbuildinfo
 .gstack/
 .cache/
+
+# Local-only internal planning/research notes (kept on disk, not published)
+docs/superpowers/

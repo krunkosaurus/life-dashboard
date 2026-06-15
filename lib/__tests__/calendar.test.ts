@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { parseEvents, parseManualEvents, mergeEvents } from "../calendar";
+import { parseEvents, parseManualEvents, mergeEvents, parseAnniversaries } from "../calendar";
 
 const ics = fs.readFileSync(
   path.join(__dirname, "fixtures/sample.ics"),
@@ -73,5 +73,58 @@ describe("mergeEvents", () => {
     const merged = mergeEvents(a, b);
     expect(merged.map(e => e.title)).toEqual(["Flight", "Lunch", "Dentist"]);
     expect(merged[0].pinned).toBe(true);
+  });
+});
+
+describe("parseAnniversaries", () => {
+  // parseAnniversaries builds dates at 08:00 local; construct `now` in local time
+  // and assert with local getters so these stay correct in any timezone.
+  const localSec = (y: number, m0: number, d: number) =>
+    Math.floor(new Date(y, m0, d, 0, 0, 0).getTime() / 1000);
+
+  it("clamps a Feb 29 entry to Feb 28 in a common year (no Mar 1 overflow)", () => {
+    const [item] = parseAnniversaries(
+      [{ name: "Leap", month: 2, day: 29 }],
+      localSec(2027, 0, 1), // Jan 1 2027 (common year)
+    );
+    const d = new Date(item.start * 1000);
+    expect(d.getMonth()).toBe(1); // February, not March
+    expect(d.getDate()).toBe(28);
+  });
+
+  it("keeps Feb 29 in a leap year", () => {
+    const [item] = parseAnniversaries(
+      [{ name: "Leap", month: 2, day: 29 }],
+      localSec(2028, 0, 1), // Jan 1 2028 (leap year)
+    );
+    const d = new Date(item.start * 1000);
+    expect(d.getMonth()).toBe(1);
+    expect(d.getDate()).toBe(29);
+  });
+
+  it("rolls to next year once this year's date has already passed", () => {
+    const [item] = parseAnniversaries(
+      [{ name: "NewYearish", month: 1, day: 15 }],
+      localSec(2026, 5, 1), // Jun 1 2026, after Jan 15
+    );
+    const d = new Date(item.start * 1000);
+    expect(d.getFullYear()).toBe(2027);
+    expect(d.getMonth()).toBe(0);
+    expect(d.getDate()).toBe(15);
+  });
+
+  it("derives birthday vs anniversary title/type and carries sinceYear", () => {
+    const events = parseAnniversaries(
+      [
+        { name: "Ada", month: 7, day: 8, year: 1815 },
+        { name: "Ada & Charles", type: "anniversary", label: "Wedding", month: 7, day: 8, year: 1835 },
+      ],
+      localSec(2026, 0, 1),
+    );
+    expect(events[0].title).toBe("Ada's Birthday");
+    expect(events[0].anniversaryType).toBe("birthday");
+    expect(events[0].sinceYear).toBe(1815);
+    expect(events[1].title).toBe("Wedding"); // label overrides
+    expect(events[1].anniversaryType).toBe("anniversary");
   });
 });

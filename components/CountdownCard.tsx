@@ -5,7 +5,7 @@ import { getMonthAccent } from "@/lib/monthColors";
 // Pad with figure space (U+2007) — same width as a tabular digit, so the
 // layout stays stable without showing a leading zero.
 function pad(n: number) {
-  return n.toString().padStart(2, " ");
+  return n.toString().padStart(2, "\u2007");
 }
 
 function parts(secs: number) {

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import type { UsageResult, UsageWindow } from "./types";
+import { recordFailure } from "./failures";
+import type { UsageFailure, UsageResult, UsageWindow } from "./types";
 
 // Codex ≥ 0.135 no longer persists rate-limit events to ~/.codex/logs_2.sqlite.
 // The TUI fetches them live over the app-server JSON-RPC method
@@ -45,6 +46,34 @@ export function parseRateLimitsResult(result: unknown, snapshotAt: number): Usag
     return { ok: false, error: "primary/secondary window missing numeric usedPercent or resetsAt" };
   }
   return { ok: true, snapshotAt, windows: [primary, secondary] };
+}
+
+// Each read spawns a `codex app-server` process, so cache briefly to coalesce
+// rapid polls (the auto-refresh tick, the manual refresh button, StrictMode's
+// double-invoke, multiple open tabs) into one spawn, and back off on errors so a
+// broken `codex` binary isn't respawned on every poll.
+const SUCCESS_TTL_MS = 15_000;
+const ERROR_TTL_MS = 60_000;
+let cache: { at: number; ttl: number; result: UsageResult } | null = null;
+
+// Recent fetch failures, surfaced in the payload so the UI can show a small
+// error history. In-memory only; resets on restart.
+let failureLog: UsageFailure[] = [];
+
+// Cached entry point for the API route: serves a recent snapshot when warm,
+// otherwise spawns codex once, logging failures and attaching the history.
+export async function fetchCodexRateLimit(): Promise<UsageResult> {
+  const now = Date.now();
+  if (cache && now - cache.at < cache.ttl) return cache.result;
+
+  const result = await readLatestCodexRateLimit();
+  if (!result.ok) {
+    console.error(`[codex-usage] fetch failed: ${result.error}`);
+    failureLog = recordFailure(failureLog, result.error, Math.floor(now / 1000));
+  }
+  const withFailures = failureLog.length > 0 ? { ...result, failures: failureLog } : result;
+  cache = { at: now, ttl: result.ok ? SUCCESS_TTL_MS : ERROR_TTL_MS, result: withFailures };
+  return withFailures;
 }
 
 const RPC_TIMEOUT_MS = 15000;

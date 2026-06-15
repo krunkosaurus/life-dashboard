@@ -2,6 +2,11 @@
   "name": "life-dashboard",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "description": "A self-hosted personal dashboard: life/year progress, Claude Code & Codex usage limits, config-driven analytics charts, Tailscale server status, and countdowns/anniversaries.",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev -H 127.0.0.1",
     "build": "next build",
@@ -14,11 +19,9 @@
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "better-sqlite3": "^11.0.0",
     "node-ical": "^0.20.1"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
