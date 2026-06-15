@@ -6,9 +6,13 @@ import { CountdownCard } from "@/components/CountdownCard";
 import { AnniversaryCard } from "@/components/AnniversaryCard";
 import { LifeBar } from "@/components/LifeBar";
 import { AnalyticsPanel } from "@/components/AnalyticsPanel";
+import { byPinnedThenMilestone, byPinnedThenSoonest, isAnniversaryEvent } from "@/lib/eventSort";
 import type { AnalyticsResult, EventItem, EventsResult, LifeConfig, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
 
 const DEFAULT_REFRESH_MS = 60_000;
+// Each event panel renders at most this many cards (a clean 3×3 grid). The
+// footer reflects the cap ("9 of 12") so the count never overstates what's shown.
+const MAX_EVENT_CARDS = 9;
 // Snapshots older than this are treated as stale and the gauges are dimmed
 // with no reset countdown. One hour comfortably covers a few skipped runs
 // without hiding ~current data.
@@ -242,24 +246,15 @@ function FailureLog({ failures }: { failures?: UsageFailure[] }) {
   );
 }
 
+function eventsFooter(total: number): string {
+  return total > MAX_EVENT_CARDS ? `${MAX_EVENT_CARDS} of ${total} upcoming` : `${total} upcoming`;
+}
+
 function EventPanels({ data }: { data: EventsResult | null }) {
   const [countdownsCollapsed, setCountdownsCollapsed] = useState(false);
   const [anniversariesCollapsed, setAnniversariesCollapsed] = useState(false);
-  // Countdowns are one-off, so order by which finishes soonest. Anniversaries
-  // recur every year, so order them by their upcoming year milestone (turning 4,
-  // turning 44, …) with the longest last; entries without an origin year have no
-  // milestone and fall to the end by calendar date. Pinned kept on top in both.
-  const byPinnedThenSoonest = (a: EventItem, b: EventItem) =>
-    a.pinned !== b.pinned ? (a.pinned ? -1 : 1) : a.start - b.start;
-  const milestone = (e: EventItem) =>
-    e.sinceYear != null ? new Date(e.start * 1000).getFullYear() - e.sinceYear : Infinity;
-  const byPinnedThenMilestone = (a: EventItem, b: EventItem) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    const ma = milestone(a), mb = milestone(b);
-    if (ma !== mb) return ma - mb;
-    const da = new Date(a.start * 1000), db = new Date(b.start * 1000);
-    return da.getMonth() - db.getMonth() || da.getDate() - db.getDate();
-  };
+  // Countdowns sort soonest-first; anniversaries sort by upcoming year milestone.
+  // Both keep pinned on top. See lib/eventSort.ts for the comparators.
   const countdowns = data?.ok ? data.events.filter(e => !isAnniversaryEvent(e)).sort(byPinnedThenSoonest) : [];
   const anniversaries = data?.ok ? data.events.filter(isAnniversaryEvent).sort(byPinnedThenMilestone) : [];
 
@@ -269,7 +264,7 @@ function EventPanels({ data }: { data: EventsResult | null }) {
         title="Countdowns"
         collapsed={countdownsCollapsed}
         onToggle={() => setCountdownsCollapsed(!countdownsCollapsed)}
-        footer={data?.ok ? `${countdowns.length} upcoming` : undefined}
+        footer={data?.ok ? eventsFooter(countdowns.length) : undefined}
       >
         <EventsGrid
           events={countdowns}
@@ -283,7 +278,7 @@ function EventPanels({ data }: { data: EventsResult | null }) {
         title="Anniversaries"
         collapsed={anniversariesCollapsed}
         onToggle={() => setAnniversariesCollapsed(!anniversariesCollapsed)}
-        footer={data?.ok ? `${anniversaries.length} upcoming` : undefined}
+        footer={data?.ok ? eventsFooter(anniversaries.length) : undefined}
       >
         <EventsGrid
           events={anniversaries}
@@ -295,10 +290,6 @@ function EventPanels({ data }: { data: EventsResult | null }) {
       </Panel>
     </div>
   );
-}
-
-function isAnniversaryEvent(event: EventItem): boolean {
-  return event.anniversaryType != null || event.sinceYear != null || /\b(birthday|anniversary)\b/i.test(event.title);
 }
 
 function EventsGrid({ events, loading, error, emptyText, kind }: {
@@ -313,7 +304,7 @@ function EventsGrid({ events, loading, error, emptyText, kind }: {
   if (events.length === 0) return <p style={{ color: "#7a8595", fontSize: 13, margin: 0 }}>{emptyText}</p>;
   return (
     <div className="grid grid-3">
-      {events.slice(0, 9).map(e =>
+      {events.slice(0, MAX_EVENT_CARDS).map(e =>
         kind === "anniversary" ? (
           <AnniversaryCard
             key={`${e.title}-${e.start}`}

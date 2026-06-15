@@ -2,8 +2,10 @@
 import { useEffect, useState } from "react";
 import { getMonthAccent } from "@/lib/monthColors";
 
+// Pad with a figure space (U+2007) — same width as a tabular digit, so single
+// hour/minute/second digits stay aligned without showing a leading zero.
 function pad(n: number) {
-  return n.toString().padStart(2, " ");
+  return n.toString().padStart(2, "\u2007");
 }
 
 function parts(secs: number) {

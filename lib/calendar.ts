@@ -52,14 +52,23 @@ export function parseManualEvents(items: ManualEventInput[], pinnedKeywords: str
   return out;
 }
 
+// Build a local 08:00 Date for the given calendar day, clamping an out-of-range
+// day down to the month's last valid day instead of letting JS overflow it into
+// the next month. Keeps a Feb 29 anniversary on Feb 28 in common years (and a
+// day-31 entry on the last of a 30-day month) rather than jumping to the 1st.
+function anniversaryDate(year: number, month: number, day: number): Date {
+  const lastDay = new Date(year, month, 0).getDate(); // day 0 of next month = last day of this one
+  return new Date(year, month - 1, Math.min(day, lastDay), 8, 0, 0);
+}
+
 export function parseAnniversaries(items: BirthdayInput[], nowSec: number): EventItem[] {
   const nowMs = nowSec * 1000;
   return items.map(b => {
     const now = new Date(nowMs);
     const year = now.getFullYear();
-    let candidate = new Date(year, b.month - 1, b.day, 8, 0, 0);
+    let candidate = anniversaryDate(year, b.month, b.day);
     if (candidate.getTime() <= nowMs) {
-      candidate = new Date(year + 1, b.month - 1, b.day, 8, 0, 0);
+      candidate = anniversaryDate(year + 1, b.month, b.day);
     }
     const type = b.type === "anniversary" ? "anniversary" : "birthday";
     const title = b.label ?? (type === "birthday" ? `${b.name}'s Birthday` : b.name);

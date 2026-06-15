@@ -12,7 +12,8 @@ A self-hosted personal dashboard. At a glance it shows:
   numbers you keep in config.
 - **Servers** — online/offline status of your Tailscale machines.
 - **Countdowns & Anniversaries** — upcoming calendar events and recurring
-  birthdays/anniversaries, split into two panels (each ordered soonest-first).
+  birthdays/anniversaries, split into two panels (Countdowns ordered
+  soonest-first; Anniversaries ordered by upcoming year milestone).
 
 Everything reads from a single `config.local.json`. Sections you don't configure
 are simply omitted.
@@ -98,12 +99,13 @@ title contains one of them (case-insensitive substring) is pinned.
 
 Events are split into two panels on the dashboard:
 
-- **Countdowns** — everything else.
+- **Countdowns** — everything else. Ordered soonest-ending first.
 - **Anniversaries** — `birthdays`/anniversaries (see below) and any event whose
-  title contains "birthday" or "anniversary".
+  title contains "birthday" or "anniversary". Ordered by upcoming year milestone
+  (turning 4, turning 44, …), smallest first; entries without an origin `year`
+  have no milestone and fall to the end by calendar date.
 
-Each panel is ordered soonest-ending first (pinned events kept on top). Both
-panels are collapsible.
+Pinned events are kept on top in both panels, and both are collapsible.
 
 ### Birthdays & anniversaries
 
