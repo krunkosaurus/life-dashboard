@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { parseChecklists } from "./checklists";
 import type {
   AnalyticsChartInput,
   AnalyticsConfig,
@@ -182,8 +183,9 @@ export function parseConfig(
     : [];
 
   const analytics = parseAnalytics(file.analytics);
+  const checklists = parseChecklists(file.checklists);
 
-  return { icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life, tailscaleHosts, analytics };
+  return { icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life, tailscaleHosts, analytics, checklists };
 }
 
 export function loadConfig(): AppConfig {

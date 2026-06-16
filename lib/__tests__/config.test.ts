@@ -280,3 +280,26 @@ describe("parseConfig analytics", () => {
     expect(cfg.analytics?.locations[0].charts[0].series).toEqual([{ label: "S", field: "f" }]);
   });
 });
+
+describe("parseConfig checklists", () => {
+  it("parses a checklists block via parseChecklists", () => {
+    const cfg = parseConfig(
+      { checklists: { title: "Daily", weekStart: "sun", items: [{ group: "Morning", label: "Cold plunge" }] } },
+      {}
+    );
+    expect(cfg.checklists?.title).toBe("Daily");
+    expect(cfg.checklists?.weekStart).toBe(0);
+    expect(cfg.checklists?.items[0]).toEqual({
+      id: "morning-cold-plunge",
+      label: "Cold plunge",
+      group: "Morning",
+      repeat: "daily",
+    });
+  });
+
+  it("defaults checklists to null when missing or with no valid items", () => {
+    expect(parseConfig({}, {}).checklists).toBeNull();
+    expect(parseConfig({ checklists: { items: [] } }, {}).checklists).toBeNull();
+    expect(parseConfig({ checklists: "nope" }, {}).checklists).toBeNull();
+  });
+});

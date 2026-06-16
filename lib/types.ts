@@ -1,3 +1,5 @@
+import type { ChecklistConfig } from "./checklists";
+
 export type UsageWindow = {
   label: string;      // e.g. "5h" | "weekly"
   usedPercent: number;
@@ -146,4 +148,5 @@ export type AppConfig = {
   life: LifeConfig | null;
   tailscaleHosts: TailscaleHostInput[];
   analytics: AnalyticsConfig | null; // parsed template; resolved by getAnalytics
+  checklists: ChecklistConfig | null; // parsed template; resolved by resolveChecklist
 };
