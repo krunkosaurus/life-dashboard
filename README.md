@@ -10,6 +10,9 @@ A self-hosted personal dashboard. At a glance it shows:
 - **Analytics** — grouped bar charts of recent daily metrics per location (e.g.
   batches/photos generated and prints requested/completed), driven entirely by
   numbers you keep in config.
+- **Checklists** — recurring daily/weekly/specific-weekday tasks, grouped into
+  labeled sections, with a day-by-day navigator so you can review what you got
+  done or missed on any date.
 - **Servers** — online/offline status of your Tailscale machines.
 - **Countdowns & Anniversaries** — upcoming calendar events and recurring
   birthdays/anniversaries, split into two panels (Countdowns ordered
@@ -74,7 +77,19 @@ panel.
     { "host": "blackpi", "alias": "Cold plunge" },
     { "host": "winton.tail87750.ts.net", "alias": "Office box" },
     { "host": "100.126.38.102", "alias": "By IP" }
-  ]
+  ],
+  "checklists": {
+    "title": "Daily Checklists",
+    "weekStart": "mon",
+    "groups": ["Morning", "Nightly", "Weekly"],
+    "items": [
+      { "group": "Morning", "label": "Cold plunge" },
+      { "group": "Morning", "label": "Supplements" },
+      { "group": "Nightly", "label": "Supplements" },
+      { "group": "Weekly",  "label": "Long run",  "repeat": "weekly" },
+      { "group": "Weekly",  "label": "Meal prep", "repeat": ["sun"] }
+    ]
+  }
 }
 ```
 
@@ -132,6 +147,53 @@ Pinned events are kept on top in both panels, and both are collapsible.
   independent of `life`.
 
 Omit `life` to hide the top bars.
+
+### Checklists
+
+**`checklists`** powers the Checklists panel — recurring tasks you tick off each
+day, with a `‹ / ›` navigator to move one day at a time through history.
+
+```json
+"checklists": {
+  "title": "Daily Checklists",
+  "weekStart": "mon",
+  "groups": ["Morning", "Lunch", "Dinner", "Nightly", "Weekly"],
+  "items": [
+    { "group": "Morning", "label": "Cold plunge" },
+    { "group": "Morning", "label": "Olive oil" },
+    { "group": "Lunch",   "label": "Olive oil" },
+    { "group": "Weekly",  "label": "Long run",  "repeat": "weekly" },
+    { "group": "Weekly",  "label": "Meal prep", "repeat": ["sun"] },
+    { "group": "Weekly",  "label": "Trash out", "repeat": ["mon", "thu"] }
+  ]
+}
+```
+
+- `title` — panel heading (defaults to `"Checklists"`).
+- `weekStart` — the weekday a week rolls over on, for weekly items (`"mon"`
+  default … `"sun"`; 3-letter or full names).
+- `groups` (optional) — fixes the display order of the labeled sections. Groups
+  used by items but not listed here are appended in first-seen order; items with
+  no `group` render last without a header.
+- `items` — each needs a `label`. Optional `group`, optional `repeat`, and an
+  optional explicit `id`.
+- `repeat` controls cadence (defaults to `"daily"`):
+  - `"daily"` — appears every day.
+  - `"weekly"` — appears every day until you check it once; that completes the
+    whole week (it stays checked through the configured week boundary).
+  - `["mon", "wed", "fri"]` — appears only on those weekdays (3-letter or full
+    names, case-insensitive).
+
+Each item gets a stable id derived from its group + label, so the same label in
+different groups (e.g. "Olive oil" under Morning/Lunch/Dinner) is tracked
+separately. Set an explicit `id` if you want history to survive a label rename.
+
+Check-off state is stored on the server in `.cache/checklist-state.json` (so it's
+shared across every device that opens the dashboard), keyed by date — daily and
+specific-weekday items by day, weekly items by week. "Today" is your browser's
+local day, so the right day is recorded regardless of the server's timezone. Past
+and future days are both navigable and editable; the **Today** button jumps back
+to the present. Omit `checklists` to hide the panel.
 
 ### Servers (Tailscale)
 

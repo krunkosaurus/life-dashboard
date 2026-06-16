@@ -55,5 +55,22 @@
         ]
       }
     ]
+  },
+  "checklists": {
+    "title": "Daily Checklists",
+    "weekStart": "mon",
+    "groups": ["Morning", "Lunch", "Dinner", "Nightly", "Weekly"],
+    "items": [
+      { "group": "Morning", "label": "Cold plunge" },
+      { "group": "Morning", "label": "Supplements" },
+      { "group": "Morning", "label": "10 air squats" },
+      { "group": "Morning", "label": "Olive oil" },
+      { "group": "Lunch",   "label": "Olive oil" },
+      { "group": "Dinner",  "label": "Olive oil" },
+      { "group": "Nightly", "label": "Supplements" },
+      { "group": "Weekly",  "label": "Long run",  "repeat": "weekly" },
+      { "group": "Weekly",  "label": "Meal prep", "repeat": ["sun"] },
+      { "group": "Weekly",  "label": "Trash out", "repeat": ["mon", "thu"] }
+    ]
   }
 }

@@ -6,7 +6,9 @@ import { CountdownCard } from "@/components/CountdownCard";
 import { AnniversaryCard } from "@/components/AnniversaryCard";
 import { LifeBar } from "@/components/LifeBar";
 import { AnalyticsPanel } from "@/components/AnalyticsPanel";
+import { ChecklistPanel } from "@/components/ChecklistPanel";
 import { byPinnedThenMilestone, byPinnedThenSoonest, isAnniversaryEvent } from "@/lib/eventSort";
+import type { ChecklistResult } from "@/lib/checklists";
 import type { AnalyticsResult, EventItem, EventsResult, LifeConfig, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
 
 const DEFAULT_REFRESH_MS = 60_000;
@@ -46,23 +48,26 @@ export default function Page() {
   const [events, setEvents] = useState<EventsResult | null>(null);
   const [servers, setServers] = useState<ServersResult | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResult | null>(null);
+  const [checklists, setChecklists] = useState<ChecklistResult | null>(null);
   const [updated, setUpdated] = useState<number | null>(null);
   const [refreshMs, setRefreshMs] = useState(DEFAULT_REFRESH_MS);
   const [life, setLife] = useState<LifeConfig | null>(null);
 
   const refresh = useCallback(async () => {
-    const [c, x, e, s, a] = await Promise.all([
+    const [c, x, e, s, a, cl] = await Promise.all([
       safeFetch<UsageResult>("/api/usage/claude"),
       safeFetch<UsageResult>("/api/usage/codex"),
       safeFetch<EventsResult>("/api/events"),
       safeFetch<ServersResult>("/api/tailscale"),
       safeFetch<AnalyticsResult>("/api/analytics"),
+      safeFetch<ChecklistResult>("/api/checklists"),
     ]);
     setClaude(c as UsageResult);
     setCodex(x as UsageResult);
     setEvents(e as EventsResult);
     setServers(s as ServersResult);
     setAnalytics(a as AnalyticsResult);
+    setChecklists(cl as ChecklistResult);
     setUpdated(Math.floor(Date.now() / 1000));
   }, []);
 
@@ -105,6 +110,8 @@ export default function Page() {
         <UsagePanel title="Claude Code" data={claude} />
         <UsagePanel title="Codex" data={codex} />
       </div>
+
+      <ChecklistPanel data={checklists} />
 
       <AnalyticsPanel data={analytics} />
 
