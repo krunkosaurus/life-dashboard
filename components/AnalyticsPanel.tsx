@@ -12,6 +12,17 @@ const Y_AXIS_WIDTH = 38;  // px, room for count labels on the left
 
 const fmt = (n: number) => n.toLocaleString();
 
+function splitDayLabel(label: string): { date: string; weekday: string | null } {
+  const match = label.match(/^(.+?)\s+-\s+([A-Za-z]{3})$/);
+  if (!match) return { date: label, weekday: null };
+  return { date: match[1], weekday: match[2] };
+}
+
+type HoverControls = {
+  hoverI: number | null;
+  setHoverI: (i: number | null) => void;
+};
+
 export function AnalyticsPanel({ data }: { data: AnalyticsResult | null }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -20,7 +31,8 @@ export function AnalyticsPanel({ data }: { data: AnalyticsResult | null }) {
   // "omit to hide" behavior).
   if (!data || !data.ok) return null;
 
-  const { title, days, locations } = data.analytics;
+  const { title, days, locationLayout, locations } = data.analytics;
+  const locationsInGrid = locationLayout === "grid";
   const range =
     days.length > 0
       ? days.length > 1
@@ -36,7 +48,10 @@ export function AnalyticsPanel({ data }: { data: AnalyticsResult | null }) {
       footer={<span style={{ color: "#7a8595" }}>{range}</span>}
     >
       <LiveClock />
-      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div
+        className={locationsInGrid ? "grid grid-2" : undefined}
+        style={locationsInGrid ? { gap: 20 } : { display: "flex", flexDirection: "column", gap: 20 }}
+      >
         {locations.map(loc => (
           <LocationBlock key={loc.name} location={loc} days={days} />
         ))}
@@ -76,6 +91,10 @@ function LiveClock() {
 }
 
 function LocationBlock({ location, days }: { location: AnalyticsLocation; days: string[] }) {
+  const [syncedHoverI, setSyncedHoverI] = useState<number | null>(null);
+  const stackCharts = location.chartLayout === "vertical";
+  const hoverControls = location.syncHover === true ? { hoverI: syncedHoverI, setHoverI: setSyncedHoverI } : undefined;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -94,9 +113,12 @@ function LocationBlock({ location, days }: { location: AnalyticsLocation; days: 
       {location.error ? (
         <p style={{ color: "#f59e0b", fontSize: 13, margin: 0 }}>Unavailable — {location.error}</p>
       ) : (
-        <div className="grid grid-2">
+        <div
+          className={stackCharts ? undefined : "grid grid-2"}
+          style={stackCharts ? { display: "flex", flexDirection: "column", gap: 16 } : undefined}
+        >
           {location.charts.map(chart => (
-            <LineChart key={chart.title} chart={chart} days={days} />
+            <LineChart key={chart.title} chart={chart} days={days} hoverControls={hoverControls} />
           ))}
         </div>
       )}
@@ -104,13 +126,15 @@ function LocationBlock({ location, days }: { location: AnalyticsLocation; days: 
   );
 }
 
-function LineChart({ chart, days }: { chart: AnalyticsChart; days: string[] }) {
+function LineChart({ chart, days, hoverControls }: { chart: AnalyticsChart; days: string[]; hoverControls?: HoverControls }) {
   const n = Math.max(days.length, ...chart.series.map(s => s.values.length), 1);
   const rawMax = Math.max(0, ...chart.series.flatMap(s => s.values));
   const { max, ticks } = niceScale(rawMax);
 
   // Which day is hovered (drives the crosshair + combined tooltip). null = none.
-  const [hoverI, setHoverI] = useState<number | null>(null);
+  const [localHoverI, setLocalHoverI] = useState<number | null>(null);
+  const hoverI = hoverControls ? hoverControls.hoverI : localHoverI;
+  const setHoverI = hoverControls ? hoverControls.setHoverI : setLocalHoverI;
 
   // Coordinates in a 0–100 box (band-centered X so points sit above their day
   // label; Y inverted so 0 is at the bottom). The SVG stretches to fill width.
@@ -237,14 +261,30 @@ function LineChart({ chart, days }: { chart: AnalyticsChart; days: string[] }) {
 
       {/* Day axis, aligned under the line area (offset past the Y-axis column). */}
       <div style={{ display: "flex", marginLeft: Y_AXIS_WIDTH }}>
-        {Array.from({ length: n }, (_, i) => (
-          <span
-            key={i}
-            style={{ flex: 1, textAlign: "center", fontSize: 10, color: i === hoverI ? "#cdd5e1" : "#7a8595", fontWeight: i === hoverI ? 600 : 400, whiteSpace: "nowrap" }}
-          >
-            {days[i] ?? ""}
-          </span>
-        ))}
+        {Array.from({ length: n }, (_, i) => {
+          const { date, weekday } = splitDayLabel(days[i] ?? "");
+          const active = i === hoverI;
+          return (
+            <span
+              key={i}
+              style={{
+                flex: 1,
+                textAlign: "center",
+                fontSize: 10,
+                color: active ? "#cdd5e1" : "#7a8595",
+                fontWeight: active ? 600 : 400,
+                whiteSpace: "nowrap",
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+                lineHeight: 1.1,
+              }}
+            >
+              <span>{date}</span>
+              {weekday && <span style={{ fontSize: 9, color: active ? "#9aa6b8" : "#636d7d" }}>{weekday}</span>}
+            </span>
+          );
+        })}
       </div>
 
       {/* Legend with totals over the window. */}

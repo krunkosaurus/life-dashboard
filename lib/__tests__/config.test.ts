@@ -182,6 +182,50 @@ describe("parseConfig analytics", () => {
     expect(cfg.analytics?.locations[1]).not.toHaveProperty("url");
   });
 
+  it("parses optional analytics chart presentation controls", () => {
+    const cfg = parseConfig(
+      {
+        analytics: {
+          locationLayout: "grid",
+          locations: [
+            {
+              name: "Stacked",
+              chartLayout: "vertical",
+              syncHover: true,
+              charts: [{ title: "C", series: [{ label: "S", values: [1] }] }],
+            },
+            {
+              name: "ExplicitGrid",
+              chartLayout: "grid",
+              syncHover: false,
+              charts: [{ title: "C", series: [{ label: "S", values: [1] }] }],
+            },
+            {
+              name: "InvalidPresentation",
+              chartLayout: "sideways",
+              syncHover: "yes",
+              charts: [{ title: "C", series: [{ label: "S", values: [1] }] }],
+            },
+          ],
+        },
+      },
+      {}
+    );
+    expect(cfg.analytics?.locationLayout).toBe("grid");
+    expect(cfg.analytics?.locations[0]).toMatchObject({ chartLayout: "vertical", syncHover: true });
+    expect(cfg.analytics?.locations[1]).toMatchObject({ chartLayout: "grid", syncHover: false });
+    expect(cfg.analytics?.locations[2]).not.toHaveProperty("chartLayout");
+    expect(cfg.analytics?.locations[2]).not.toHaveProperty("syncHover");
+  });
+
+  it("drops invalid analytics location layout values", () => {
+    const cfg = parseConfig(
+      { analytics: { locationLayout: "columns", locations: valid.analytics.locations } },
+      {}
+    );
+    expect(cfg.analytics).not.toHaveProperty("locationLayout");
+  });
+
   it("drops malformed locations, charts, and series", () => {
     const cfg = parseConfig(
       {

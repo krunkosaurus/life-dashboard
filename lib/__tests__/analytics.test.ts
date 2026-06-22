@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import { formatDay, resolveCharts } from "../analytics";
 
 describe("formatDay", () => {
-  it("formats an ISO date as 'Mon D' in UTC", () => {
-    expect(formatDay("2026-06-08")).toBe("Jun 8");
-    expect(formatDay("2026-12-31")).toBe("Dec 31");
+  it("formats an ISO date as 'Mon D - Weekday' in UTC", () => {
+    expect(formatDay("2026-06-08")).toBe("Jun 8 - Mon");
+    expect(formatDay("2026-12-31")).toBe("Dec 31 - Thu");
   });
 
   it("returns the input unchanged when unparseable", () => {
@@ -31,7 +31,7 @@ describe("resolveCharts", () => {
       ],
       rows
     );
-    expect(days).toEqual(["Jun 8", "Jun 9"]);
+    expect(days).toEqual(["Jun 8 - Mon", "Jun 9 - Tue"]);
     expect(charts[0].series[0]).toEqual({ label: "Batches", values: [0, 3] });
     expect(charts[0].series[1]).toEqual({ label: "Photos", values: [0, 26] });
   });
@@ -62,6 +62,6 @@ describe("resolveCharts", () => {
       ],
       "day"
     );
-    expect(days).toEqual(["Jun 8", "Jun 9"]);
+    expect(days).toEqual(["Jun 8 - Mon", "Jun 9 - Tue"]);
   });
 });

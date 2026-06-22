@@ -19,12 +19,16 @@ let cache: { at: number; result: AnalyticsResult } | null = null;
 
 type HistoricalRow = Record<string, unknown>;
 
-// Format an ISO date ("2026-06-08") as a short UTC label ("Jun 8"). The dates
-// are calendar days, so format in UTC to avoid a local-timezone off-by-one.
+// Format an ISO date ("2026-06-08") as a short UTC label ("Jun 8 - Mon").
+// The dates are calendar days, so format in UTC to avoid a local-timezone
+// off-by-one.
 export function formatDay(iso: string): string {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return iso;
-  return new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const date = new Date(t);
+  const day = date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const weekday = date.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+  return `${day} - ${weekday}`;
 }
 
 // Pure mapping: turn historical API rows + a location's chart templates into
@@ -82,6 +86,8 @@ async function resolveLocation(
 ): Promise<{ days: string[]; location: AnalyticsLocation }> {
   const base: AnalyticsLocation = { name: loc.name, charts: [] };
   if (loc.url) base.url = loc.url;
+  if (loc.chartLayout) base.chartLayout = loc.chartLayout;
+  if (typeof loc.syncHover === "boolean") base.syncHover = loc.syncHover;
 
   // Static location: no source, use the literal values as-is.
   if (!loc.source) {
@@ -114,6 +120,7 @@ export async function getAnalytics(): Promise<AnalyticsResult> {
   const analytics: AnalyticsResolved = {
     title: template.title,
     days,
+    ...(template.locationLayout ? { locationLayout: template.locationLayout } : {}),
     locations: resolved.map(r => r.location),
   };
 
