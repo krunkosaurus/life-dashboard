@@ -48,18 +48,22 @@ export default function Page() {
   const [events, setEvents] = useState<EventsResult | null>(null);
   const [servers, setServers] = useState<ServersResult | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsResult | null>(null);
+  const [analyticsWeekOffset, setAnalyticsWeekOffset] = useState(0);
   const [checklists, setChecklists] = useState<ChecklistResult | null>(null);
   const [updated, setUpdated] = useState<number | null>(null);
   const [refreshMs, setRefreshMs] = useState(DEFAULT_REFRESH_MS);
   const [life, setLife] = useState<LifeConfig | null>(null);
 
   const refresh = useCallback(async () => {
+    const analyticsUrl = analyticsWeekOffset === 0
+      ? "/api/analytics"
+      : `/api/analytics?weekOffset=${analyticsWeekOffset}`;
     const [c, x, e, s, a, cl] = await Promise.all([
       safeFetch<UsageResult>("/api/usage/claude"),
       safeFetch<UsageResult>("/api/usage/codex"),
       safeFetch<EventsResult>("/api/events"),
       safeFetch<ServersResult>("/api/tailscale"),
-      safeFetch<AnalyticsResult>("/api/analytics"),
+      safeFetch<AnalyticsResult>(analyticsUrl),
       safeFetch<ChecklistResult>("/api/checklists"),
     ]);
     setClaude(c as UsageResult);
@@ -69,7 +73,7 @@ export default function Page() {
     setAnalytics(a as AnalyticsResult);
     setChecklists(cl as ChecklistResult);
     setUpdated(Math.floor(Date.now() / 1000));
-  }, []);
+  }, [analyticsWeekOffset]);
 
   // Honor the configured refreshSeconds (config.local.json). Fetched once on
   // mount; the polling effect below re-arms whenever the interval changes.
@@ -113,7 +117,11 @@ export default function Page() {
 
       <ChecklistPanel data={checklists} />
 
-      <AnalyticsPanel data={analytics} />
+      <AnalyticsPanel
+        data={analytics}
+        weekOffset={analyticsWeekOffset}
+        onWeekOffsetChange={(offset) => setAnalyticsWeekOffset(Math.min(0, offset))}
+      />
 
       <ServersPanel data={servers} />
 

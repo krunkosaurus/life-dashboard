@@ -209,9 +209,9 @@ is online and auto-expands the moment a server goes down.
 
 ### Analytics (charts)
 
-**`analytics`** powers the charts panel. It's fully config-driven — the dashboard
-renders whatever daily datapoints you put here, so the grouping and labels are
-yours to define:
+**`analytics`** powers the charts panel, including a week-by-week navigator for
+live sources. It's fully config-driven — the dashboard renders whatever daily
+datapoints you put here, so the grouping and labels are yours to define:
 
 ```json
 "analytics": {
@@ -295,12 +295,19 @@ The `source` describes any JSON HTTP endpoint that returns one row per day
   Use it for APIs that return different data per calling origin.
 - `source.params` (optional) — query params appended to the URL, e.g.
   `{ "days": 7 }`.
+- `source.rangeParams` (optional) — override the query parameter names used for
+  the selected 7-day range when your API supports explicit ranges, e.g.
+  `{ "start": "from", "end": "to", "offset": "week" }`.
 - `source.dateField` (optional) — the row property holding the day; defaults to
   `"date"`.
 - Series then use `field` (the row property to read each day) instead of
-  `values`; the day labels come from each row's date field. Results are cached
-  briefly server-side. If a location's fetch fails, that location shows an
-  "Unavailable" message while the others keep rendering.
+  `values`; the day labels come from each row's date field. By default, the
+  dashboard increases the `days` lookback as you move back by week, then slices
+  the selected 7-day window locally. If `rangeParams` is configured, it sends the
+  selected UTC start, end, and week offset using those parameter names instead.
+  Results are cached briefly server-side per selected week. If a location's fetch
+  fails, that location shows an "Unavailable" message while the others keep
+  rendering.
 
 Malformed entries are dropped defensively, and non-numeric values become `0`.
 Omit `analytics` entirely to hide the panel.

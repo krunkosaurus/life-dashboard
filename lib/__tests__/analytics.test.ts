@@ -1,5 +1,55 @@
 import { describe, it, expect } from "vitest";
-import { formatDay, resolveCharts } from "../analytics";
+import {
+  analyticsRangeForWeekOffset,
+  formatDay,
+  requestedDaysForWeekOffset,
+  resolveCharts,
+  rowsForWeekOffset,
+} from "../analytics";
+
+describe("analyticsRangeForWeekOffset", () => {
+  const now = new Date("2026-06-22T12:00:00Z");
+
+  it("uses the current UTC rolling 7-day range for offset 0", () => {
+    expect(analyticsRangeForWeekOffset(0, now)).toEqual({
+      startDate: "2026-06-16",
+      endDate: "2026-06-22",
+      weekOffset: 0,
+    });
+  });
+
+  it("moves the selected UTC range by whole weeks into the past", () => {
+    expect(analyticsRangeForWeekOffset(-1, now)).toEqual({
+      startDate: "2026-06-09",
+      endDate: "2026-06-15",
+      weekOffset: -1,
+    });
+  });
+
+  it("clamps future offsets to the current range", () => {
+    expect(analyticsRangeForWeekOffset(1, now)).toEqual(analyticsRangeForWeekOffset(0, now));
+  });
+});
+
+describe("requestedDaysForWeekOffset", () => {
+  it("requests enough lookback rows to slice the selected week locally", () => {
+    expect(requestedDaysForWeekOffset(0)).toBe(7);
+    expect(requestedDaysForWeekOffset(-1)).toBe(14);
+    expect(requestedDaysForWeekOffset(-2)).toBe(21);
+  });
+});
+
+describe("rowsForWeekOffset", () => {
+  const rows = Array.from({ length: 14 }, (_, i) => i + 1);
+
+  it("keeps the current 7 rows at offset 0", () => {
+    expect(rowsForWeekOffset(rows, 0)).toEqual([8, 9, 10, 11, 12, 13, 14]);
+  });
+
+  it("selects the previous 7 rows for one week back", () => {
+    expect(rowsForWeekOffset(rows, -1)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+});
 
 describe("formatDay", () => {
   it("formats an ISO date as 'Mon D - Weekday' in UTC", () => {

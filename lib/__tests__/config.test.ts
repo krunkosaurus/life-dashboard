@@ -279,6 +279,7 @@ describe("parseConfig analytics", () => {
                 api: "https://api.example.com/historical",
                 origin: "https://a.example.com",
                 params: { days: 7, theme: "a" },
+                rangeParams: { start: "from", end: "to", offset: "week" },
                 dateField: "day",
               },
               charts: [{ title: "Generation", series: [{ label: "Batches", field: "batches" }] }],
@@ -292,6 +293,7 @@ describe("parseConfig analytics", () => {
       api: "https://api.example.com/historical",
       origin: "https://a.example.com",
       params: { days: 7, theme: "a" },
+      rangeParams: { start: "from", end: "to", offset: "week" },
       dateField: "day",
     });
     expect(cfg.analytics?.locations[0].charts[0].series[0]).toEqual({ label: "Batches", field: "batches" });
