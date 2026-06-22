@@ -43,6 +43,14 @@ function parseAnalyticsSource(input: unknown): AnalyticsSourceInput | undefined 
   const source: AnalyticsSourceInput = { api: o.api.trim() };
   if (typeof o.origin === "string" && o.origin.trim() !== "") source.origin = o.origin.trim();
   if (typeof o.dateField === "string" && o.dateField.trim() !== "") source.dateField = o.dateField.trim();
+  if (o.rangeParams && typeof o.rangeParams === "object" && !Array.isArray(o.rangeParams)) {
+    const raw = o.rangeParams as Record<string, unknown>;
+    const rangeParams: NonNullable<AnalyticsSourceInput["rangeParams"]> = {};
+    if (typeof raw.start === "string" && raw.start.trim() !== "") rangeParams.start = raw.start.trim();
+    if (typeof raw.end === "string" && raw.end.trim() !== "") rangeParams.end = raw.end.trim();
+    if (typeof raw.offset === "string" && raw.offset.trim() !== "") rangeParams.offset = raw.offset.trim();
+    if (Object.keys(rangeParams).length > 0) source.rangeParams = rangeParams;
+  }
   if (o.params && typeof o.params === "object" && !Array.isArray(o.params)) {
     const params: Record<string, string | number> = {};
     for (const [k, v] of Object.entries(o.params as Record<string, unknown>)) {

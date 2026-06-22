@@ -80,6 +80,11 @@ export type AnalyticsSourceInput = {
   api: string;                               // endpoint URL (required)
   origin?: string;                           // sent as Origin/Referer — for APIs that key off it
   params?: Record<string, string | number>; // query params appended to the URL
+  rangeParams?: {
+    start?: string;                          // query param name for selected range start (default "startDate")
+    end?: string;                            // query param name for selected range end (default "endDate")
+    offset?: string;                         // query param name for selected week offset (default "weekOffset")
+  };
   dateField?: string;                        // row field holding the day (default "date")
 };
 

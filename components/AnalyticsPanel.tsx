@@ -23,7 +23,13 @@ type HoverControls = {
   setHoverI: (i: number | null) => void;
 };
 
-export function AnalyticsPanel({ data }: { data: AnalyticsResult | null }) {
+type AnalyticsPanelProps = {
+  data: AnalyticsResult | null;
+  weekOffset?: number;
+  onWeekOffsetChange?: (offset: number) => void;
+};
+
+export function AnalyticsPanel({ data, weekOffset = 0, onWeekOffsetChange }: AnalyticsPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   // Hide entirely when unconfigured or still loading — analytics is optional,
@@ -47,6 +53,7 @@ export function AnalyticsPanel({ data }: { data: AnalyticsResult | null }) {
       onToggle={() => setCollapsed(!collapsed)}
       footer={<span style={{ color: "#7a8595" }}>{range}</span>}
     >
+      <WeekNavigator weekOffset={weekOffset} onChange={onWeekOffsetChange} />
       <LiveClock />
       <div
         className={locationsInGrid ? "grid grid-2" : undefined}
@@ -57,6 +64,36 @@ export function AnalyticsPanel({ data }: { data: AnalyticsResult | null }) {
         ))}
       </div>
     </Panel>
+  );
+}
+
+function WeekNavigator({ weekOffset, onChange }: { weekOffset: number; onChange?: (offset: number) => void }) {
+  if (!onChange) return null;
+  const distance = Math.abs(weekOffset);
+  const canGoForward = weekOffset < 0;
+  const label =
+    weekOffset === 0
+      ? "Current 7 days"
+      : `${distance} week${distance === 1 ? "" : "s"} back`;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+      <button onClick={() => onChange(weekOffset - 1)} aria-label="Previous week" style={weekNavBtnStyle}>‹</button>
+      <div style={{ textAlign: "center", lineHeight: 1.3 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+        {weekOffset !== 0 && (
+          <button onClick={() => onChange(0)} style={weekCurrentBtnStyle}>Current</button>
+        )}
+      </div>
+      <button
+        onClick={() => onChange(Math.min(0, weekOffset + 1))}
+        aria-label="Next week"
+        disabled={!canGoForward}
+        style={{ ...weekNavBtnStyle, opacity: canGoForward ? 1 : 0.45, cursor: canGoForward ? "pointer" : "not-allowed" }}
+      >
+        ›
+      </button>
+    </div>
   );
 }
 
@@ -337,3 +374,13 @@ function DayTooltip({ chart, dayLabel, i, x, frac }: { chart: AnalyticsChart; da
     </div>
   );
 }
+
+const weekNavBtnStyle: React.CSSProperties = {
+  background: "transparent", color: "#7aa2f7", border: "1px solid #1c222b",
+  width: 30, height: 30, borderRadius: 8, cursor: "pointer", fontSize: 18, lineHeight: 1,
+};
+
+const weekCurrentBtnStyle: React.CSSProperties = {
+  background: "transparent", color: "#7aa2f7", border: "1px solid #1c222b",
+  padding: "3px 9px", borderRadius: 8, cursor: "pointer", fontSize: 11, marginTop: 4,
+};

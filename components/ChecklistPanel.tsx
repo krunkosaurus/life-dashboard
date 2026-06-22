@@ -159,7 +159,6 @@ function ChecklistRow({ item, checked, onToggle }: {
   checked: boolean;
   onToggle: () => void;
 }) {
-  const weekly = item.repeat === "weekly";
   return (
     <label
       style={{
@@ -180,11 +179,6 @@ function ChecklistRow({ item, checked, onToggle }: {
       }}>
         {item.label}
       </span>
-      {weekly && (
-        <span style={{ fontSize: 9, letterSpacing: 1, color: "#7aa2f7", border: "1px solid #1c2530", borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>
-          WEEKLY
-        </span>
-      )}
     </label>
   );
 }
