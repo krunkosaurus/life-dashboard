@@ -238,11 +238,23 @@ yours to define:
 
 - `title` — panel heading (defaults to `"Analytics"`).
 - `days` — x-axis labels, one per data point (e.g. the last 7 days).
-- `locations` — each is `{ name, url?, charts }`. `url` (optional) adds a "source"
-  link. Each location renders its charts side by side.
-- `charts` — each is `{ title, series }`. Every chart draws its series as grouped
-  bars across the days, with a per-series total in the legend. Two series per chart
+- `locationLayout` (optional) — set to `"grid"` to place locations in responsive
+  columns; omit it or use `"stack"` for the default top-to-bottom location list.
+- `locations` — each is `{ name, url?, chartLayout?, syncHover?, source?, charts }`.
+  `url` (optional) adds a "source" link. By default, each location renders its
+  charts side by side with independent hover state.
+- `chartLayout` (optional) — set to `"vertical"` to stack a location's charts;
+  omit it or use `"grid"` for the default side-by-side layout.
+- `syncHover` (optional) — set to `true` to share the hovered day across all
+  charts in that location. This is useful for related charts with the same
+  x-axis, regardless of whether they are side by side or stacked.
+- `charts` — each is `{ title, series }`. Every chart draws its series as lines
+  across the days, with a per-series total in the legend. Two series per chart
   (a natural pair) reads best, but any number works.
+
+For two tracked locations where each has two related charts, use
+`"locationLayout": "grid"` on `analytics` plus `"chartLayout": "vertical"` on
+each location. That renders one location per column, with its charts stacked.
 
 Each **series** is one of two modes:
 

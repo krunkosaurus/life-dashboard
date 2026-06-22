@@ -3,7 +3,9 @@ import path from "node:path";
 import { parseChecklists } from "./checklists";
 import type {
   AnalyticsChartInput,
+  AnalyticsChartLayout,
   AnalyticsConfig,
+  AnalyticsLocationLayout,
   AnalyticsLocationInput,
   AnalyticsSeriesInput,
   AnalyticsSourceInput,
@@ -17,6 +19,8 @@ import type {
 const DEFAULT_REFRESH = 60;
 const MIN_REFRESH = 5;
 const CONFIG_PATH = path.join(process.cwd(), "config.local.json");
+const ANALYTICS_CHART_LAYOUTS = new Set<AnalyticsChartLayout>(["grid", "vertical"]);
+const ANALYTICS_LOCATION_LAYOUTS = new Set<AnalyticsLocationLayout>(["stack", "grid"]);
 
 // Treat the example/placeholder values as unset so users who copy
 // config.example.json verbatim see the friendly "not configured" message
@@ -97,6 +101,10 @@ function parseAnalytics(input: unknown): AnalyticsConfig | null {
     if (charts.length === 0) return [];
     const out: AnalyticsLocationInput = { name: lo.name.trim(), charts };
     if (typeof lo.url === "string" && lo.url.trim() !== "") out.url = lo.url.trim();
+    if (typeof lo.chartLayout === "string" && ANALYTICS_CHART_LAYOUTS.has(lo.chartLayout as AnalyticsChartLayout)) {
+      out.chartLayout = lo.chartLayout as AnalyticsChartLayout;
+    }
+    if (typeof lo.syncHover === "boolean") out.syncHover = lo.syncHover;
     const source = parseAnalyticsSource(lo.source);
     if (source) out.source = source;
     return [out];
@@ -109,8 +117,12 @@ function parseAnalytics(input: unknown): AnalyticsConfig | null {
     : [];
   const title =
     typeof o.title === "string" && o.title.trim() !== "" ? o.title.trim() : "Analytics";
+  const locationLayout =
+    typeof o.locationLayout === "string" && ANALYTICS_LOCATION_LAYOUTS.has(o.locationLayout as AnalyticsLocationLayout)
+      ? (o.locationLayout as AnalyticsLocationLayout)
+      : undefined;
 
-  return { title, days, locations };
+  return { title, days, ...(locationLayout ? { locationLayout } : {}), locations };
 }
 
 export function parseConfig(

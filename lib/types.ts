@@ -96,16 +96,22 @@ export type AnalyticsChartInput = {
   series: AnalyticsSeriesInput[];
 };
 
+export type AnalyticsChartLayout = "grid" | "vertical";
+export type AnalyticsLocationLayout = "stack" | "grid";
+
 export type AnalyticsLocationInput = {
   name: string;
   url?: string;                  // optional link to the source analytics page
   source?: AnalyticsSourceInput; // present → fetch live; absent → use static values
+  chartLayout?: AnalyticsChartLayout; // default "grid"; "vertical" stacks charts
+  syncHover?: boolean;           // true → one hovered day highlights all charts in the location
   charts: AnalyticsChartInput[];
 };
 
 export type AnalyticsConfig = {
   title: string;                      // panel sub-title; defaults to "Analytics"
   days: string[];                     // static x-axis labels; may be empty (live derives its own)
+  locationLayout?: AnalyticsLocationLayout; // default "stack"; "grid" places locations in columns
   locations: AnalyticsLocationInput[];
 };
 
@@ -125,13 +131,16 @@ export type AnalyticsChart = {
 export type AnalyticsLocation = {
   name: string;
   url?: string;
+  chartLayout?: AnalyticsChartLayout;
+  syncHover?: boolean;
   charts: AnalyticsChart[];
   error?: string; // set when a live fetch failed; charts is then empty
 };
 
 export type AnalyticsResolved = {
   title: string;
-  days: string[];      // x-axis labels (e.g. ["Jun 8", …])
+  days: string[];      // x-axis labels (e.g. ["Jun 8 - Mon", …])
+  locationLayout?: AnalyticsLocationLayout;
   locations: AnalyticsLocation[];
 };
 
