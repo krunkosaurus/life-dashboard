@@ -13,13 +13,16 @@ A self-hosted personal dashboard. At a glance it shows:
 - **Checklists** — recurring daily/weekly/specific-weekday tasks, grouped into
   labeled sections, with a day-by-day navigator so you can review what you got
   done or missed on any date.
+- **Oura Ring** — last night's sleep summary plus today's step count, fetched
+  from Oura's V2 API.
 - **Servers** — online/offline status of your Tailscale machines.
 - **Countdowns & Anniversaries** — upcoming calendar events and recurring
   birthdays/anniversaries, split into two panels (Countdowns ordered
   soonest-first; Anniversaries ordered by upcoming year milestone).
 
-Everything reads from a single `config.local.json`. Sections you don't configure
-are simply omitted.
+Most settings read from `config.local.json`; OAuth integrations also use local
+environment variables and `.cache/` token files. Sections you don't configure are
+simply omitted.
 
 ![Life Dashboard screenshot](docs/images/life-dashboard-demo.png)
 
@@ -30,6 +33,7 @@ are simply omitted.
   (for the usage gauges)
 - The Tailscale CLI on this host, and this host joined to your tailnet, for the
   Servers panel (optional — leave `tailscaleHosts` empty to hide it)
+- An Oura developer app with the `daily` scope, for the Oura panel (optional)
 
 ## Setup
 ```bash
@@ -53,9 +57,9 @@ npm start            # next start -H 127.0.0.1 (honors PORT)
 
 ## Configuration
 
-All settings live in `config.local.json` (gitignored). `config.example.json` is a
-complete, working template. Every key is optional; omit a section to hide its
-panel.
+Dashboard settings live in `config.local.json` (gitignored). `config.example.json`
+is a complete, working template. OAuth credentials use local environment
+variables. Every key is optional; omit a section to hide its panel.
 
 ```json
 {
@@ -195,6 +199,41 @@ local day, so the right day is recorded regardless of the server's timezone. Pas
 and future days are both navigable and editable; the **Today** button jumps back
 to the present. Omit `checklists` to hide the panel.
 
+### Oura Ring
+
+The Oura panel shows the selected day's main sleep period and daily activity
+steps, with a day-by-day navigator for reviewing recent history. It uses Oura API
+V2 OAuth and stores the rotating user token locally in `.cache/oura-token.json`.
+
+Add these to `.env.local`:
+
+```bash
+OURA_CLIENT_ID=your-oura-client-id
+OURA_CLIENT_SECRET=your-oura-client-secret
+# Optional; defaults to http://127.0.0.1:3000/api/oura/callback
+OURA_REDIRECT_URI=http://127.0.0.1:3000/api/oura/callback
+# Optional; defaults to the server's timezone
+OURA_TIME_ZONE=Asia/Singapore
+```
+
+In the Oura developer portal, the redirect URI must exactly match
+`OURA_REDIRECT_URI`. Then start the dashboard and open:
+
+```text
+http://127.0.0.1:3000/api/oura/connect
+```
+
+If your Oura app already uses an external redirect URI, keep that value in
+`OURA_REDIRECT_URI`, run the authorization flow there, then exchange the returned
+`code` locally at:
+
+```text
+http://127.0.0.1:3000/api/oura/exchange
+```
+
+The panel is omitted when `OURA_CLIENT_ID` is not set. If credentials are present
+but no user token has been stored yet, the panel shows a connect link.
+
 ### Servers (Tailscale)
 
 **`tailscaleHosts`** lists machines to monitor. Each is `{ "host": ..., "alias"?: ... }`
@@ -331,11 +370,15 @@ minimum 5).
   `Retry-After` when rate limited). Recent fetch failures are logged per source in
   a collapsible list under each gauge.
 - **Servers** come from the local `tailscale` CLI (see above), cached briefly.
+- **Oura Ring** comes from Oura API V2: `daily_sleep` and `sleep` for last
+  night's sleep, and `daily_activity` for today's steps. OAuth access tokens are
+  refreshed server-side and the rotated token is kept in `.cache/oura-token.json`.
 - **Events** come from `manualEvents`, `birthdays`, and/or `icsUrl`, all merged.
 
 ## Security
-The server binds to `127.0.0.1` only. `config.local.json` is gitignored because
-your private `.ics` URL is a secret, and OAuth tokens never leave the server.
+The server binds to `127.0.0.1` only. `config.local.json`, `.env*.local`, and
+`.cache/` are gitignored because they can contain private calendar URLs, OAuth
+client secrets, and user tokens. OAuth tokens never leave the server.
 
 ## Tests
 ```bash
