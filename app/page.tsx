@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/Panel";
 import { LimitGauge } from "@/components/LimitGauge";
 import { CountdownCard } from "@/components/CountdownCard";
@@ -7,9 +7,10 @@ import { AnniversaryCard } from "@/components/AnniversaryCard";
 import { LifeBar } from "@/components/LifeBar";
 import { AnalyticsPanel } from "@/components/AnalyticsPanel";
 import { ChecklistPanel } from "@/components/ChecklistPanel";
+import { OuraPanel } from "@/components/OuraPanel";
 import { byPinnedThenMilestone, byPinnedThenSoonest, isAnniversaryEvent } from "@/lib/eventSort";
 import type { ChecklistResult } from "@/lib/checklists";
-import type { AnalyticsResult, EventItem, EventsResult, LifeConfig, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
+import type { AnalyticsResult, EventItem, EventsResult, LifeConfig, OuraResult, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
 
 const DEFAULT_REFRESH_MS = 60_000;
 // Each event panel renders at most this many cards (a clean 3×3 grid). The
@@ -50,21 +51,30 @@ export default function Page() {
   const [analytics, setAnalytics] = useState<AnalyticsResult | null>(null);
   const [analyticsWeekOffset, setAnalyticsWeekOffset] = useState(0);
   const [checklists, setChecklists] = useState<ChecklistResult | null>(null);
+  const [oura, setOura] = useState<OuraResult | null>(null);
+  const [ouraDayOffset, setOuraDayOffset] = useState(0);
+  const [ouraLoading, setOuraLoading] = useState(false);
   const [updated, setUpdated] = useState<number | null>(null);
   const [refreshMs, setRefreshMs] = useState(DEFAULT_REFRESH_MS);
   const [life, setLife] = useState<LifeConfig | null>(null);
+  const ouraRequestSeq = useRef(0);
 
   const refresh = useCallback(async () => {
     const analyticsUrl = analyticsWeekOffset === 0
       ? "/api/analytics"
       : `/api/analytics?weekOffset=${analyticsWeekOffset}`;
-    const [c, x, e, s, a, cl] = await Promise.all([
+    const ouraUrl = ouraDayOffset === 0
+      ? "/api/oura"
+      : `/api/oura?dayOffset=${ouraDayOffset}`;
+    const ouraRequest = ++ouraRequestSeq.current;
+    const [c, x, e, s, a, cl, o] = await Promise.all([
       safeFetch<UsageResult>("/api/usage/claude"),
       safeFetch<UsageResult>("/api/usage/codex"),
       safeFetch<EventsResult>("/api/events"),
       safeFetch<ServersResult>("/api/tailscale"),
       safeFetch<AnalyticsResult>(analyticsUrl),
       safeFetch<ChecklistResult>("/api/checklists"),
+      safeFetch<OuraResult>(ouraUrl),
     ]);
     setClaude(c as UsageResult);
     setCodex(x as UsageResult);
@@ -72,8 +82,21 @@ export default function Page() {
     setServers(s as ServersResult);
     setAnalytics(a as AnalyticsResult);
     setChecklists(cl as ChecklistResult);
+    if (ouraRequest === ouraRequestSeq.current) {
+      setOura(o as OuraResult);
+      setOuraLoading(false);
+    }
     setUpdated(Math.floor(Date.now() / 1000));
-  }, [analyticsWeekOffset]);
+  }, [analyticsWeekOffset, ouraDayOffset]);
+
+  const changeOuraDayOffset = useCallback((offset: number) => {
+    const next = Math.min(0, offset);
+    setOuraDayOffset(prev => {
+      if (prev === next) return prev;
+      setOuraLoading(true);
+      return next;
+    });
+  }, []);
 
   // Honor the configured refreshSeconds (config.local.json). Fetched once on
   // mount; the polling effect below re-arms whenever the interval changes.
@@ -109,6 +132,13 @@ export default function Page() {
       </header>
 
       {life && <LifeBar life={life} />}
+
+      <OuraPanel
+        data={oura}
+        loading={ouraLoading}
+        dayOffset={ouraDayOffset}
+        onDayOffsetChange={changeOuraDayOffset}
+      />
 
       <div className="grid grid-2">
         <UsagePanel title="Claude Code" data={claude} />

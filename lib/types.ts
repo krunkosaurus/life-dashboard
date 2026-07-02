@@ -70,6 +70,46 @@ export type ServersResult =
   | { ok: true; servers: ServerStatus[]; checkedAt: number }
   | { ok: false; error: string };
 
+export type OuraSleepSummary = {
+  day: string;
+  score: number | null;
+  bedtimeStart: string | null;
+  bedtimeEnd: string | null;
+  totalSleepSeconds: number | null;
+  timeInBedSeconds: number | null;
+  efficiency: number | null;
+  deepSleepSeconds: number | null;
+  remSleepSeconds: number | null;
+  lightSleepSeconds: number | null;
+  awakeSeconds: number | null;
+};
+
+export type OuraActivitySummary = {
+  day: string;
+  steps: number;
+  score: number | null;
+  activeCalories: number | null;
+  targetCalories: number | null;
+  timestamp: string | null;
+};
+
+export type OuraResult =
+  | {
+      ok: true;
+      day: string;
+      sleep: OuraSleepSummary | null;
+      activity: OuraActivitySummary | null;
+      checkedAt: number;
+      timeZone: string;
+    }
+  | {
+      ok: false;
+      error: string;
+      connectUrl?: string;
+      hidden?: boolean;
+      retryAfterSeconds?: number;
+    };
+
 // ---- Analytics: config-file (template) shape, produced by parseConfig ----
 
 // A live data source for a location: a JSON HTTP endpoint returning one row per
