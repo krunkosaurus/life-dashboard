@@ -202,7 +202,8 @@ to the present. Omit `checklists` to hide the panel.
 ### Oura Ring
 
 The Oura panel shows the selected day's main sleep period and daily activity
-steps, with a day-by-day navigator for reviewing recent history. It uses Oura API
+steps, with a day-by-day navigator for reviewing recent history. The panel footer
+shows the latest Oura document sync time when Oura provides one. It uses Oura API
 V2 OAuth and stores the rotating user token locally in `.cache/oura-token.json`.
 
 Add these to `.env.local`:

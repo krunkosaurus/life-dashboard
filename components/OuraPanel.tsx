@@ -42,8 +42,12 @@ function scoreText(score: number | null, label: string): string {
   return score == null ? `${label} score —` : `${label} score ${score}`;
 }
 
-function checkedFooter(checkedAt: number): string {
-  return `checked ${new Date(checkedAt * 1000).toLocaleTimeString()}`;
+function syncFooter(lastSyncedAt: string | null, checkedAt: number): string {
+  const syncedMs = lastSyncedAt ? Date.parse(lastSyncedAt) : NaN;
+  if (Number.isFinite(syncedMs)) {
+    return `synced ${new Date(syncedMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  }
+  return `checked ${new Date(checkedAt * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
 function ymdInTimeZone(date: Date, timeZone?: string): string {
@@ -121,7 +125,7 @@ export function OuraPanel({ data, loading = false, dayOffset = 0, onDayOffsetCha
     : "No activity data yet";
 
   return (
-    <Panel title="Oura" footer={loading ? "updating" : checkedFooter(data.checkedAt)}>
+    <Panel title="Oura" footer={loading ? "updating" : syncFooter(data.lastSyncedAt, data.checkedAt)}>
       {onDayOffsetChange && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <button onClick={() => onDayOffsetChange(dayOffset - 1)} aria-label="Previous day" style={navBtnStyle}>‹</button>

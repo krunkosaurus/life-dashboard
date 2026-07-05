@@ -73,6 +73,7 @@ export type ServersResult =
 export type OuraSleepSummary = {
   day: string;
   score: number | null;
+  timestamp: string | null;
   bedtimeStart: string | null;
   bedtimeEnd: string | null;
   totalSleepSeconds: number | null;
@@ -100,6 +101,7 @@ export type OuraResult =
       sleep: OuraSleepSummary | null;
       activity: OuraActivitySummary | null;
       checkedAt: number;
+      lastSyncedAt: string | null;
       timeZone: string;
     }
   | {

@@ -69,7 +69,7 @@ describe("Oura document selection", () => {
 describe("summarizeOuraDocuments", () => {
   it("maps sleep and steps into the dashboard summary", () => {
     const summary = summarizeOuraDocuments(
-      [{ day: "2026-07-02", score: 88 }],
+      [{ day: "2026-07-02", score: 88, timestamp: "2026-07-02T07:05:00+08:00" }],
       [{
         day: "2026-07-02",
         type: "long_sleep",
@@ -81,7 +81,7 @@ describe("summarizeOuraDocuments", () => {
         deep_sleep_duration: 5400,
         rem_sleep_duration: 7200,
       }],
-      [{ day: "2026-07-02", steps: 4567, score: 72, active_calories: 350 }],
+      [{ day: "2026-07-02", steps: 4567, score: 72, active_calories: 350, timestamp: "2026-07-02T14:30:00+08:00" }],
       "2026-07-02",
       "Asia/Singapore",
     );
@@ -101,6 +101,19 @@ describe("summarizeOuraDocuments", () => {
       score: 72,
       activeCalories: 350,
     });
+    expect(summary.lastSyncedAt).toBe("2026-07-02T14:30:00+08:00");
+  });
+
+  it("ignores invalid sync timestamps", () => {
+    const summary = summarizeOuraDocuments(
+      [{ day: "2026-07-02", score: 88, timestamp: "not-a-date" }],
+      [{ day: "2026-07-02", type: "long_sleep", total_sleep_duration: 25200 }],
+      [{ day: "2026-07-02", steps: 4567, timestamp: "" }],
+      "2026-07-02",
+      "Asia/Singapore",
+    );
+
+    expect(summary.lastSyncedAt).toBeNull();
   });
 
   it("does not use the previous day's sleep when the selected day has no sleep", () => {
