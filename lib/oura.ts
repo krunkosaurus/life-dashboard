@@ -162,6 +162,19 @@ function asInteger(v: unknown): number | null {
   return n == null ? null : Math.trunc(n);
 }
 
+function latestIsoTimestamp(values: Array<string | null>): string | null {
+  let latest: string | null = null;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!value) continue;
+    const ms = Date.parse(value);
+    if (!Number.isFinite(ms) || ms <= latestMs) continue;
+    latest = value;
+    latestMs = ms;
+  }
+  return latest;
+}
+
 function sortByDayThenTimestampDesc<T extends { day?: unknown; timestamp?: unknown }>(docs: T[]): T[] {
   return [...docs].sort((a, b) => {
     const dayCmp = String(asString(b.day) ?? "").localeCompare(String(asString(a.day) ?? ""));
@@ -205,15 +218,18 @@ export function summarizeOuraDocuments(
   activityDocs: OuraDailyActivityDoc[],
   day: string,
   timeZone = ouraTimeZone(),
-): Pick<Extract<OuraResult, { ok: true }>, "day" | "sleep" | "activity" | "timeZone"> {
+): Pick<Extract<OuraResult, { ok: true }>, "day" | "sleep" | "activity" | "lastSyncedAt" | "timeZone"> {
   const dailySleep = selectDailySleep(dailySleepDocs, day);
   const sleepDay = asString(dailySleep?.day);
   const primarySleep = selectPrimarySleep(sleepDocs, sleepDay ?? day, day);
   const activity = selectDailyActivity(activityDocs, day);
+  const sleepTimestamp = asString(dailySleep?.timestamp);
+  const activityTimestamp = asString(activity?.timestamp);
 
   const sleep: OuraSleepSummary | null = sleepDay || primarySleep ? {
     day: sleepDay ?? asString(primarySleep?.day) ?? day,
     score: asInteger(dailySleep?.score),
+    timestamp: sleepTimestamp,
     bedtimeStart: asString(primarySleep?.bedtime_start),
     bedtimeEnd: asString(primarySleep?.bedtime_end),
     totalSleepSeconds: asInteger(primarySleep?.total_sleep_duration),
@@ -234,7 +250,13 @@ export function summarizeOuraDocuments(
     timestamp: asString(activity.timestamp),
   } : null;
 
-  return { day, sleep, activity: activitySummary, timeZone };
+  return {
+    day,
+    sleep,
+    activity: activitySummary,
+    lastSyncedAt: latestIsoTimestamp([sleepTimestamp, activityTimestamp]),
+    timeZone,
+  };
 }
 
 function readToken(): OuraTokenState | null {
