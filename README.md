@@ -202,9 +202,11 @@ to the present. Omit `checklists` to hide the panel.
 ### Oura Ring
 
 The Oura panel shows the selected day's main sleep period and daily activity
-steps, with a day-by-day navigator for reviewing recent history. The panel footer
-shows the latest Oura document sync time when Oura provides one. It uses Oura API
-V2 OAuth and stores the rotating user token locally in `.cache/oura-token.json`.
+steps, with a day-by-day navigator for reviewing recent history. When authorized
+with the `heartrate` scope, the panel footer estimates the last ring sync from
+the latest heart-rate sample available through Oura; otherwise it falls back to
+the dashboard check time. It uses Oura API V2 OAuth and stores the rotating user
+token locally in `.cache/oura-token.json`.
 
 Add these to `.env.local`:
 
@@ -233,7 +235,9 @@ http://127.0.0.1:3000/api/oura/exchange
 ```
 
 The panel is omitted when `OURA_CLIENT_ID` is not set. If credentials are present
-but no user token has been stored yet, the panel shows a connect link.
+but no user token has been stored yet, the panel shows a connect link. Tokens
+created before the `heartrate` scope was requested must be reconnected before
+the sync estimate can be shown.
 
 ### Servers (Tailscale)
 
@@ -372,7 +376,8 @@ minimum 5).
   a collapsible list under each gauge.
 - **Servers** come from the local `tailscale` CLI (see above), cached briefly.
 - **Oura Ring** comes from Oura API V2: `daily_sleep` and `sleep` for last
-  night's sleep, and `daily_activity` for today's steps. OAuth access tokens are
+  night's sleep, `daily_activity` for today's steps, and `heartrate` for an
+  approximate last-sync indicator when authorized. OAuth access tokens are
   refreshed server-side and the rotated token is kept in `.cache/oura-token.json`.
 - **Events** come from `manualEvents`, `birthdays`, and/or `icsUrl`, all merged.
 

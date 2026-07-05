@@ -9,7 +9,7 @@ const TOKEN_URL = `${API_BASE}/oauth/token`;
 const FETCH_TIMEOUT_MS = 10_000;
 const SUCCESS_TTL_MS = 60_000;
 const REFRESH_SKEW_MS = 60_000;
-const OURA_SCOPES = ["daily"];
+const OURA_SCOPES = ["daily", "heartrate"];
 
 let cache: { at: number; result: OuraResult } | null = null;
 let refreshInFlight: Promise<TokenResult> | null = null;
@@ -62,6 +62,10 @@ type OuraDailyActivityDoc = {
   score?: unknown;
   active_calories?: unknown;
   target_calories?: unknown;
+  timestamp?: unknown;
+};
+
+type OuraHeartRateDoc = {
   timestamp?: unknown;
 };
 
@@ -212,24 +216,25 @@ export function selectDailyActivity(docs: OuraDailyActivityDoc[], today: string)
   return sortByDayThenTimestampDesc(docs).find(d => asString(d.day) === today) ?? null;
 }
 
+export function selectLatestHeartRateTimestamp(docs: OuraHeartRateDoc[]): string | null {
+  return latestIsoTimestamp(docs.map(d => asString(d.timestamp)));
+}
+
 export function summarizeOuraDocuments(
   dailySleepDocs: OuraDailySleepDoc[],
   sleepDocs: OuraSleepDoc[],
   activityDocs: OuraDailyActivityDoc[],
   day: string,
   timeZone = ouraTimeZone(),
-): Pick<Extract<OuraResult, { ok: true }>, "day" | "sleep" | "activity" | "lastSyncedAt" | "timeZone"> {
+): Pick<Extract<OuraResult, { ok: true }>, "day" | "sleep" | "activity" | "timeZone"> {
   const dailySleep = selectDailySleep(dailySleepDocs, day);
   const sleepDay = asString(dailySleep?.day);
   const primarySleep = selectPrimarySleep(sleepDocs, sleepDay ?? day, day);
   const activity = selectDailyActivity(activityDocs, day);
-  const sleepTimestamp = asString(dailySleep?.timestamp);
-  const activityTimestamp = asString(activity?.timestamp);
 
   const sleep: OuraSleepSummary | null = sleepDay || primarySleep ? {
     day: sleepDay ?? asString(primarySleep?.day) ?? day,
     score: asInteger(dailySleep?.score),
-    timestamp: sleepTimestamp,
     bedtimeStart: asString(primarySleep?.bedtime_start),
     bedtimeEnd: asString(primarySleep?.bedtime_end),
     totalSleepSeconds: asInteger(primarySleep?.total_sleep_duration),
@@ -250,13 +255,7 @@ export function summarizeOuraDocuments(
     timestamp: asString(activity.timestamp),
   } : null;
 
-  return {
-    day,
-    sleep,
-    activity: activitySummary,
-    lastSyncedAt: latestIsoTimestamp([sleepTimestamp, activityTimestamp]),
-    timeZone,
-  };
+  return { day, sleep, activity: activitySummary, timeZone };
 }
 
 function readToken(): OuraTokenState | null {
@@ -399,25 +398,47 @@ async function validAccessToken(requestUrl?: string): Promise<TokenResult> {
 }
 
 async function fetchOuraCollection<T>(
-  endpoint: "daily_sleep" | "sleep" | "daily_activity",
+  endpoint: "daily_sleep" | "sleep" | "daily_activity" | "heartrate",
   token: string,
   params: Record<string, string>,
 ): Promise<T[]> {
-  const qs = new URLSearchParams(params);
-  const url = `${API_BASE}/v2/usercollection/${endpoint}?${qs.toString()}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-  if (!res.ok) {
-    const retry = retryAfterSeconds(res);
-    const suffix = retry != null ? `; retry after ${retry}s` : "";
-    throw new Error(`Oura ${endpoint} HTTP ${res.status}${suffix}`);
+  const docs: T[] = [];
+  let nextToken: string | null = null;
+  for (let page = 0; page < 5; page++) {
+    const qs = new URLSearchParams(params);
+    if (nextToken) qs.set("next_token", nextToken);
+    const url = `${API_BASE}/v2/usercollection/${endpoint}?${qs.toString()}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const retry = retryAfterSeconds(res);
+      const suffix = retry != null ? `; retry after ${retry}s` : "";
+      throw new Error(`Oura ${endpoint} HTTP ${res.status}${suffix}`);
+    }
+    const body = await res.json() as OuraDocumentResponse<T>;
+    if (!Array.isArray(body.data)) throw new Error(`Oura ${endpoint} returned unexpected response shape`);
+    docs.push(...body.data);
+    nextToken = typeof body.next_token === "string" && body.next_token !== "" ? body.next_token : null;
+    if (!nextToken) return docs;
   }
-  const body = await res.json() as OuraDocumentResponse<T>;
-  if (!Array.isArray(body.data)) throw new Error(`Oura ${endpoint} returned unexpected response shape`);
-  return body.data;
+  return docs;
+}
+
+async function fetchLatestSyncEstimate(token: string, now: Date): Promise<string | null> {
+  try {
+    const start = new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString();
+    const end = now.toISOString();
+    const heartRates = await fetchOuraCollection<OuraHeartRateDoc>("heartrate", token, {
+      start_datetime: start,
+      end_datetime: end,
+    });
+    return selectLatestHeartRateTimestamp(heartRates);
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchOuraStats(requestUrl?: string, options: OuraStatsOptions = {}): Promise<OuraResult> {
@@ -442,13 +463,14 @@ export async function fetchOuraStats(requestUrl?: string, options: OuraStatsOpti
   }
 
   try {
-    const [dailySleep, sleep, activity] = await Promise.all([
+    const [dailySleep, sleep, activity, lastSyncedAt] = await Promise.all([
       fetchOuraCollection<OuraDailySleepDoc>("daily_sleep", token.token, { start_date: previousDay, end_date: day }),
       fetchOuraCollection<OuraSleepDoc>("sleep", token.token, { start_date: previousDay, end_date: day }),
       fetchOuraCollection<OuraDailyActivityDoc>("daily_activity", token.token, { start_date: previousDay, end_date: day }),
+      fetchLatestSyncEstimate(token.token, now),
     ]);
     const mapped = summarizeOuraDocuments(dailySleep, sleep, activity, day, timeZone);
-    const result: OuraResult = { ok: true, ...mapped, checkedAt: Math.floor(Date.now() / 1000) };
+    const result: OuraResult = { ok: true, ...mapped, checkedAt: Math.floor(Date.now() / 1000), lastSyncedAt };
     cache = { at: Date.now(), result };
     return result;
   } catch (e) {
