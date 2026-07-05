@@ -5,6 +5,7 @@ import {
   selectedOuraDay,
   selectDailyActivity,
   selectDailySleep,
+  selectLatestHeartRateTimestamp,
   selectPrimarySleep,
   summarizeOuraDocuments,
   ymdInTimeZone,
@@ -64,6 +65,14 @@ describe("Oura document selection", () => {
       { day: "2026-07-02", steps: 4321 },
     ], "2026-07-02")).toEqual({ day: "2026-07-02", steps: 4321 });
   });
+
+  it("selects the latest valid heart-rate timestamp as the sync estimate", () => {
+    expect(selectLatestHeartRateTimestamp([
+      { timestamp: "not-a-date" },
+      { timestamp: "2026-07-02T08:15:00+08:00" },
+      { timestamp: "2026-07-02T09:40:00+08:00" },
+    ])).toBe("2026-07-02T09:40:00+08:00");
+  });
 });
 
 describe("summarizeOuraDocuments", () => {
@@ -101,19 +110,14 @@ describe("summarizeOuraDocuments", () => {
       score: 72,
       activeCalories: 350,
     });
-    expect(summary.lastSyncedAt).toBe("2026-07-02T14:30:00+08:00");
   });
 
-  it("ignores invalid sync timestamps", () => {
-    const summary = summarizeOuraDocuments(
-      [{ day: "2026-07-02", score: 88, timestamp: "not-a-date" }],
-      [{ day: "2026-07-02", type: "long_sleep", total_sleep_duration: 25200 }],
-      [{ day: "2026-07-02", steps: 4567, timestamp: "" }],
-      "2026-07-02",
-      "Asia/Singapore",
-    );
-
-    expect(summary.lastSyncedAt).toBeNull();
+  it("returns null when no valid heart-rate timestamp is available", () => {
+    expect(selectLatestHeartRateTimestamp([
+      { timestamp: "not-a-date" },
+      { timestamp: "" },
+      {},
+    ])).toBeNull();
   });
 
   it("does not use the previous day's sleep when the selected day has no sleep", () => {

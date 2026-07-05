@@ -42,10 +42,14 @@ function scoreText(score: number | null, label: string): string {
   return score == null ? `${label} score —` : `${label} score ${score}`;
 }
 
-function syncFooter(lastSyncedAt: string | null, checkedAt: number): string {
+function syncFooter(lastSyncedAt: string | null, checkedAt: number): React.ReactNode {
   const syncedMs = lastSyncedAt ? Date.parse(lastSyncedAt) : NaN;
   if (Number.isFinite(syncedMs)) {
-    return `synced ${new Date(syncedMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+    return (
+      <span title="Approximate sync time from the latest Oura heart-rate sample">
+        synced ~{new Date(syncedMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+      </span>
+    );
   }
   return `checked ${new Date(checkedAt * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
