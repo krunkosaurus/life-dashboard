@@ -8,6 +8,7 @@ const AUTH_URL = "https://cloud.ouraring.com/oauth/authorize";
 const TOKEN_URL = `${API_BASE}/oauth/token`;
 const FETCH_TIMEOUT_MS = 10_000;
 const SUCCESS_TTL_MS = 60_000;
+const STALE_TTL_MS = 5 * 60_000;
 const REFRESH_SKEW_MS = 60_000;
 const OURA_SCOPES = ["daily", "heartrate"];
 
@@ -75,12 +76,23 @@ type OuraStatsOptions = {
   now?: Date;
 };
 
+type OuraSummaryOptions = {
+  allowLatestSleepBeforeDay?: boolean;
+  flagPendingActivity?: boolean;
+};
+
+type OuraSuccessResult = Extract<OuraResult, { ok: true }>;
+
 function cacheDir(): string {
   return process.env.OURA_CACHE_DIR || path.join(process.cwd(), ".cache");
 }
 
 function tokenPath(): string {
   return process.env.OURA_TOKEN_PATH || path.join(cacheDir(), "oura-token.json");
+}
+
+function lastGoodPath(): string {
+  return process.env.OURA_LAST_GOOD_PATH || path.join(cacheDir(), "oura-last-good.json");
 }
 
 export function defaultOuraRedirectUri(requestUrl?: string): string {
@@ -191,6 +203,13 @@ export function selectDailySleep(docs: OuraDailySleepDoc[], today: string): Oura
   return sortByDayThenTimestampDesc(docs).find(d => asString(d.day) === today) ?? null;
 }
 
+export function selectLatestDailySleepOnOrBefore(docs: OuraDailySleepDoc[], today: string): OuraDailySleepDoc | null {
+  return sortByDayThenTimestampDesc(docs).find(d => {
+    const day = asString(d.day);
+    return day != null && day <= today;
+  }) ?? null;
+}
+
 export function selectPrimarySleep(docs: OuraSleepDoc[], day: string | null, today: string): OuraSleepDoc | null {
   const validTypes = new Set(["sleep", "long_sleep", "late_nap"]);
   const candidates = docs.filter(d => {
@@ -216,6 +235,14 @@ export function selectDailyActivity(docs: OuraDailyActivityDoc[], today: string)
   return sortByDayThenTimestampDesc(docs).find(d => asString(d.day) === today) ?? null;
 }
 
+export function isPendingActivityPlaceholder(activity: OuraActivitySummary | null): boolean {
+  return Boolean(
+    activity
+    && activity.steps === 0
+    && activity.activeCalories === 0
+  );
+}
+
 export function selectLatestHeartRateTimestamp(docs: OuraHeartRateDoc[]): string | null {
   return latestIsoTimestamp(docs.map(d => asString(d.timestamp)));
 }
@@ -226,8 +253,10 @@ export function summarizeOuraDocuments(
   activityDocs: OuraDailyActivityDoc[],
   day: string,
   timeZone = ouraTimeZone(),
-): Pick<Extract<OuraResult, { ok: true }>, "day" | "sleep" | "activity" | "timeZone"> {
-  const dailySleep = selectDailySleep(dailySleepDocs, day);
+  options: OuraSummaryOptions = {},
+): Pick<Extract<OuraResult, { ok: true }>, "day" | "sleep" | "activity" | "activityPending" | "timeZone"> {
+  const dailySleep = selectDailySleep(dailySleepDocs, day)
+    ?? (options.allowLatestSleepBeforeDay ? selectLatestDailySleepOnOrBefore(dailySleepDocs, day) : null);
   const sleepDay = asString(dailySleep?.day);
   const primarySleep = selectPrimarySleep(sleepDocs, sleepDay ?? day, day);
   const activity = selectDailyActivity(activityDocs, day);
@@ -254,8 +283,15 @@ export function summarizeOuraDocuments(
     targetCalories: asInteger(activity.target_calories),
     timestamp: asString(activity.timestamp),
   } : null;
+  const activityPending = Boolean(options.flagPendingActivity && isPendingActivityPlaceholder(activitySummary));
 
-  return { day, sleep, activity: activitySummary, timeZone };
+  return {
+    day,
+    sleep,
+    activity: activityPending ? null : activitySummary,
+    ...(activityPending ? { activityPending } : {}),
+    timeZone,
+  };
 }
 
 function readToken(): OuraTokenState | null {
@@ -283,6 +319,52 @@ function writeToken(token: OuraTokenState): void {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(token), { mode: 0o600 });
   fs.renameSync(tmp, file);
+}
+
+function isOuraSuccessResult(value: unknown): value is OuraSuccessResult {
+  if (!value || typeof value !== "object") return false;
+  const o = value as Record<string, unknown>;
+  return o.ok === true
+    && typeof o.day === "string"
+    && (o.sleep == null || typeof o.sleep === "object")
+    && (o.activity == null || typeof o.activity === "object")
+    && typeof o.checkedAt === "number"
+    && (o.lastSyncedAt == null || typeof o.lastSyncedAt === "string")
+    && typeof o.timeZone === "string";
+}
+
+function writeLastGood(result: OuraSuccessResult): void {
+  try {
+    const file = lastGoodPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    const clean: OuraSuccessResult = { ...result };
+    delete clean.staleReason;
+    fs.writeFileSync(tmp, JSON.stringify(clean), { mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } catch {
+    // A failed local cache write should not make live Oura data unavailable.
+  }
+}
+
+function readLastGood(day: string): OuraSuccessResult | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(lastGoodPath(), "utf8")) as unknown;
+    if (!isOuraSuccessResult(parsed) || parsed.day !== day) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function staleOuraResult(result: OuraSuccessResult, error: string): OuraSuccessResult {
+  const activityPending = result.activityPending || isPendingActivityPlaceholder(result.activity);
+  return {
+    ...result,
+    activity: activityPending ? null : result.activity,
+    ...(activityPending ? { activityPending: true } : {}),
+    staleReason: error,
+  };
 }
 
 function tokenFromResponse(body: Record<string, unknown>, fallbackRefreshToken?: string): OuraTokenState | null {
@@ -448,9 +530,14 @@ export async function fetchOuraStats(requestUrl?: string, options: OuraStatsOpti
 
   const timeZone = ouraTimeZone();
   const now = options.now ?? new Date();
+  const { today } = ouraDateRange(now, timeZone);
   const day = selectedOuraDay(options, now, timeZone);
   const previousDay = addDaysYmd(day, -1);
-  if (cache && cache.result.ok && cache.result.day === day && Date.now() - cache.at < SUCCESS_TTL_MS) return cache.result;
+  const sleepStartDay = addDaysYmd(previousDay, -1);
+  if (cache && cache.result.ok && cache.result.day === day) {
+    const ttl = cache.result.staleReason ? STALE_TTL_MS : SUCCESS_TTL_MS;
+    if (Date.now() - cache.at < ttl) return cache.result;
+  }
 
   const token = await validAccessToken(requestUrl);
   if (!token.ok) {
@@ -465,16 +552,27 @@ export async function fetchOuraStats(requestUrl?: string, options: OuraStatsOpti
   try {
     const [dailySleep, sleep, activity, lastSyncedAt] = await Promise.all([
       fetchOuraCollection<OuraDailySleepDoc>("daily_sleep", token.token, { start_date: previousDay, end_date: day }),
-      fetchOuraCollection<OuraSleepDoc>("sleep", token.token, { start_date: previousDay, end_date: day }),
+      fetchOuraCollection<OuraSleepDoc>("sleep", token.token, { start_date: sleepStartDay, end_date: day }),
       fetchOuraCollection<OuraDailyActivityDoc>("daily_activity", token.token, { start_date: previousDay, end_date: day }),
       fetchLatestSyncEstimate(token.token, now),
     ]);
-    const mapped = summarizeOuraDocuments(dailySleep, sleep, activity, day, timeZone);
+    const mapped = summarizeOuraDocuments(dailySleep, sleep, activity, day, timeZone, {
+      allowLatestSleepBeforeDay: day === today,
+      flagPendingActivity: day === today,
+    });
     const result: OuraResult = { ok: true, ...mapped, checkedAt: Math.floor(Date.now() / 1000), lastSyncedAt };
     cache = { at: Date.now(), result };
+    writeLastGood(result);
     return result;
   } catch (e) {
-    return { ok: false, error: (e as Error).message };
+    const error = (e as Error).message;
+    const stale = readLastGood(day);
+    if (stale) {
+      const result = staleOuraResult(stale, error);
+      cache = { at: Date.now(), result };
+      return result;
+    }
+    return { ok: false, error };
   }
 }
 

@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   addDaysYmd,
+  isPendingActivityPlaceholder,
   ouraDateRange,
   selectedOuraDay,
   selectDailyActivity,
   selectDailySleep,
+  selectLatestDailySleepOnOrBefore,
   selectLatestHeartRateTimestamp,
   selectPrimarySleep,
+  staleOuraResult,
   summarizeOuraDocuments,
   ymdInTimeZone,
 } from "../oura";
@@ -40,12 +43,20 @@ describe("Oura date helpers", () => {
 });
 
 describe("Oura document selection", () => {
-  it("selects the latest daily sleep document not after today", () => {
+  it("selects the daily sleep document for the requested day", () => {
     expect(selectDailySleep([
       { day: "2026-07-01", score: 78 },
       { day: "2026-07-02", score: 84 },
       { day: "2026-07-03", score: 90 },
     ], "2026-07-02")).toEqual({ day: "2026-07-02", score: 84 });
+  });
+
+  it("can select the latest daily sleep document before a requested day", () => {
+    expect(selectLatestDailySleepOnOrBefore([
+      { day: "2026-07-01", score: 78 },
+      { day: "2026-07-02", score: 84 },
+      { day: "2026-07-04", score: 90 },
+    ], "2026-07-03")).toEqual({ day: "2026-07-02", score: 84 });
   });
 
   it("prefers the long sleep for the selected day", () => {
@@ -64,6 +75,25 @@ describe("Oura document selection", () => {
       { day: "2026-07-01", steps: 1000 },
       { day: "2026-07-02", steps: 4321 },
     ], "2026-07-02")).toEqual({ day: "2026-07-02", steps: 4321 });
+  });
+
+  it("identifies all-zero activity placeholders", () => {
+    expect(isPendingActivityPlaceholder({
+      day: "2026-07-02",
+      steps: 0,
+      score: 54,
+      activeCalories: 0,
+      targetCalories: 450,
+      timestamp: "2026-07-02T04:00:00.000+08:00",
+    })).toBe(true);
+    expect(isPendingActivityPlaceholder({
+      day: "2026-07-02",
+      steps: 12,
+      score: 54,
+      activeCalories: 0,
+      targetCalories: 450,
+      timestamp: "2026-07-02T04:00:00.000+08:00",
+    })).toBe(false);
   });
 
   it("selects the latest valid heart-rate timestamp as the sync estimate", () => {
@@ -132,5 +162,80 @@ describe("summarizeOuraDocuments", () => {
     expect(summary.day).toBe("2026-07-02");
     expect(summary.sleep).toBeNull();
     expect(summary.activity).toMatchObject({ day: "2026-07-02", steps: 3000 });
+  });
+
+  it("uses the latest previous sleep when fallback is enabled", () => {
+    const summary = summarizeOuraDocuments(
+      [{ day: "2026-07-01", score: 80 }],
+      [{
+        day: "2026-07-01",
+        type: "long_sleep",
+        bedtime_start: "2026-07-01T00:30:00+08:00",
+        bedtime_end: "2026-07-01T08:00:00+08:00",
+        total_sleep_duration: 25200,
+      }],
+      [{ day: "2026-07-02", steps: 3000 }],
+      "2026-07-02",
+      "Asia/Singapore",
+      { allowLatestSleepBeforeDay: true },
+    );
+
+    expect(summary.day).toBe("2026-07-02");
+    expect(summary.sleep).toMatchObject({
+      day: "2026-07-01",
+      score: 80,
+      totalSleepSeconds: 25200,
+    });
+    expect(summary.activity).toMatchObject({ day: "2026-07-02", steps: 3000 });
+  });
+
+  it("hides today's pending all-zero activity placeholder when enabled", () => {
+    const summary = summarizeOuraDocuments(
+      [],
+      [],
+      [{ day: "2026-07-02", steps: 0, score: 54, active_calories: 0, target_calories: 450 }],
+      "2026-07-02",
+      "Asia/Singapore",
+      { flagPendingActivity: true },
+    );
+
+    expect(summary.activity).toBeNull();
+    expect(summary.activityPending).toBe(true);
+  });
+
+  it("keeps all-zero activity when placeholder detection is disabled", () => {
+    const summary = summarizeOuraDocuments(
+      [],
+      [],
+      [{ day: "2026-07-02", steps: 0, score: 54, active_calories: 0, target_calories: 450 }],
+      "2026-07-02",
+      "Asia/Singapore",
+    );
+
+    expect(summary.activity).toMatchObject({ day: "2026-07-02", steps: 0, activeCalories: 0 });
+    expect(summary.activityPending).toBeUndefined();
+  });
+
+  it("marks cached fallback data as stale and normalizes pending activity", () => {
+    const stale = staleOuraResult({
+      ok: true,
+      day: "2026-07-02",
+      sleep: null,
+      activity: {
+        day: "2026-07-02",
+        steps: 0,
+        score: 54,
+        activeCalories: 0,
+        targetCalories: 450,
+        timestamp: "2026-07-02T04:00:00.000+08:00",
+      },
+      checkedAt: 1783585020,
+      lastSyncedAt: null,
+      timeZone: "Asia/Singapore",
+    }, "The operation was aborted due to timeout");
+
+    expect(stale.staleReason).toBe("The operation was aborted due to timeout");
+    expect(stale.activity).toBeNull();
+    expect(stale.activityPending).toBe(true);
   });
 });

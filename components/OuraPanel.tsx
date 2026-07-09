@@ -54,6 +54,11 @@ function syncFooter(lastSyncedAt: string | null, checkedAt: number): React.React
   return `checked ${new Date(checkedAt * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
+function staleFooter(reason: string, checkedAt: number): React.ReactNode {
+  const checked = new Date(checkedAt * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return <span title={reason}>stale · checked {checked}</span>;
+}
+
 function ymdInTimeZone(date: Date, timeZone?: string): string {
   const opts: Intl.DateTimeFormatOptions = {
     year: "numeric",
@@ -92,6 +97,13 @@ function dayLabels(day: string, dayOffset: number): { rel: string; full: string 
   return { rel, full };
 }
 
+function shortDayLabel(day: string): string {
+  const date = new Date(`${day}T00:00:00Z`);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })
+    : day;
+}
+
 type OuraPanelProps = {
   data: OuraResult | null;
   loading?: boolean;
@@ -116,20 +128,33 @@ export function OuraPanel({ data, loading = false, dayOffset = 0, onDayOffsetCha
   }
 
   const sleep = loading ? null : data.sleep;
-  const activity = loading ? null : data.activity;
+  const activityPending = !loading && Boolean(data.activityPending);
+  const activity = loading || activityPending ? null : data.activity;
   const selectedDay = loading ? dayForOffset(dayOffset, data.timeZone) : data.day;
   const labels = dayLabels(selectedDay, dayOffset);
   const canGoForward = dayOffset < 0;
   const window = sleep ? sleepWindow(sleep.bedtimeStart, sleep.bedtimeEnd) : null;
+  const sleepSub = sleep
+    ? [
+        sleep.day !== selectedDay ? `Latest sleep ${shortDayLabel(sleep.day)}` : null,
+        scoreText(sleep.score, "Sleep"),
+        window,
+      ].filter(Boolean).join(" · ")
+    : "No sleep data yet";
   const activitySub = activity
     ? [
         scoreText(activity.score, "Activity"),
         activity.activeCalories == null ? null : `${fmtInt(activity.activeCalories)} active cal`,
       ].filter(Boolean).join(" · ")
+    : activityPending
+    ? "Waiting for Oura API update"
     : "No activity data yet";
 
   return (
-    <Panel title="Oura" footer={loading ? "updating" : syncFooter(data.lastSyncedAt, data.checkedAt)}>
+    <Panel
+      title="Oura"
+      footer={loading ? "updating" : data.staleReason ? staleFooter(data.staleReason, data.checkedAt) : syncFooter(data.lastSyncedAt, data.checkedAt)}
+    >
       {onDayOffsetChange && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <button onClick={() => onDayOffsetChange(dayOffset - 1)} aria-label="Previous day" style={navBtnStyle}>‹</button>
@@ -161,8 +186,7 @@ export function OuraPanel({ data, loading = false, dayOffset = 0, onDayOffsetCha
             {loading ? "—" : sleep ? fmtDuration(sleep.totalSleepSeconds) : "—"}
           </strong>
           <div style={{ color: "#9aa6b8", fontSize: 12, lineHeight: 1.4 }}>
-            {loading ? "Updating..." : sleep ? scoreText(sleep.score, "Sleep") : "No sleep data yet"}
-            {window && <span> · {window}</span>}
+            {loading ? "Updating..." : sleepSub}
           </div>
           {loading ? (
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", color: "#7a8595", fontSize: 11 }}>
