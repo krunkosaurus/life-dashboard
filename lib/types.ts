@@ -99,8 +99,10 @@ export type OuraResult =
       day: string;
       sleep: OuraSleepSummary | null;
       activity: OuraActivitySummary | null;
+      activityPending?: boolean;
       checkedAt: number;
       lastSyncedAt: string | null;
+      staleReason?: string;
       timeZone: string;
     }
   | {
