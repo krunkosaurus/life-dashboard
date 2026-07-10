@@ -29,6 +29,19 @@ describe("normalizeClaudeUsage", () => {
     const result = normalizeClaudeUsage({ totally: "different" });
     expect(result.ok).toBe(false);
   });
+
+  it("accepts unused windows without a scheduled reset", () => {
+    expect(normalizeClaudeUsage({
+      five_hour: { utilization: 0, resets_at: null },
+      seven_day: { utilization: 0, resets_at: null },
+    })).toEqual({
+      ok: true,
+      windows: [
+        { label: "5h", usedPercent: 0, windowSecs: 18000 },
+        { label: "weekly", usedPercent: 0, windowSecs: 604800 },
+      ],
+    });
+  });
 });
 
 describe("pickFreshestCreds", () => {
@@ -117,6 +130,16 @@ describe("last-good disk cache", () => {
   it("round-trips a snapshot through disk", () => {
     persistLastGood(lg, file);
     expect(loadLastGoodFromDisk(file)).toEqual(lg);
+    fs.rmSync(file, { force: true });
+  });
+
+  it("round-trips a snapshot without a scheduled reset", () => {
+    const withoutReset = {
+      atMs: lg.atMs,
+      windows: [{ label: "5h", usedPercent: 0, windowSecs: 18000 }],
+    };
+    persistLastGood(withoutReset, file);
+    expect(loadLastGoodFromDisk(file)).toEqual(withoutReset);
     fs.rmSync(file, { force: true });
   });
 

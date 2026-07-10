@@ -3,7 +3,7 @@ import type { ChecklistConfig } from "./checklists";
 export type UsageWindow = {
   label: string;      // e.g. "5h" | "weekly"
   usedPercent: number;
-  resetAt: number;    // unix seconds
+  resetAt?: number;   // unix seconds; omitted when no reset is scheduled
   windowSecs?: number; // window duration in seconds; omitted when unknown
 };
 
