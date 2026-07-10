@@ -47,7 +47,8 @@ function isUsageWindow(w: unknown): w is UsageWindow {
   const x = w as Record<string, unknown>;
   return typeof x.label === "string"
     && typeof x.usedPercent === "number" && Number.isFinite(x.usedPercent)
-    && typeof x.resetAt === "number" && Number.isFinite(x.resetAt);
+    && (x.resetAt === undefined
+      || (typeof x.resetAt === "number" && Number.isFinite(x.resetAt)));
 }
 
 export function persistLastGood(lg: LastGood, file = LAST_GOOD_PATH): void {
@@ -103,10 +104,14 @@ function tsFrom(v: unknown): number | null {
 function extract(v: unknown, label: string, windowSecs: number): UsageWindow | null {
   if (!v || typeof v !== "object") return null;
   const w = v as Window;
-  if (typeof w.utilization !== "number") return null;
+  if (typeof w.utilization !== "number" || !Number.isFinite(w.utilization)) return null;
   const reset = tsFrom(w.resets_at);
-  if (reset == null) return null;
-  return { label, usedPercent: w.utilization, resetAt: reset, windowSecs };
+  const window: UsageWindow = { label, usedPercent: w.utilization, windowSecs };
+  // Anthropic returns utilization: 0 with resets_at: null when a quota window
+  // has no usage and therefore no reset scheduled. That is a valid live
+  // snapshot, not a malformed response.
+  if (reset != null) window.resetAt = reset;
+  return window;
 }
 
 export function normalizeClaudeUsage(raw: unknown): UsageResult {
@@ -115,12 +120,13 @@ export function normalizeClaudeUsage(raw: unknown): UsageResult {
   }
   const r = raw as Record<string, unknown>;
   // The OAuth usage API reports no window durations, so they're fixed here:
-  // five_hour is 5h, seven_day is 7d.
+  // five_hour is 5h, seven_day is 7d. A reset timestamp may be absent for an
+  // unused window; extract still returns its valid utilization in that case.
   const fiveHour = extract(r.five_hour, "5h", 5 * 3600);
   const weekly = extract(r.seven_day, "weekly", 7 * 24 * 3600);
   const windows = [fiveHour, weekly].filter((w): w is UsageWindow => w !== null);
   if (windows.length === 0) {
-    return { ok: false, error: "no usable windows in response (five_hour and seven_day both null or malformed)" };
+    return { ok: false, error: "no usable windows in response (five_hour and seven_day both missing or without numeric utilization)" };
   }
   return { ok: true, windows };
 }

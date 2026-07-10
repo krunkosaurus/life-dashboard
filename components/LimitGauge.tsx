@@ -21,21 +21,22 @@ function fmtCountdown(secs: number): string {
 }
 
 export function LimitGauge({ label, usedPercent, resetAt, windowSecs, stale = false }: {
-  label: string; usedPercent: number; resetAt: number; windowSecs?: number; stale?: boolean;
+  label: string; usedPercent: number; resetAt?: number; windowSecs?: number; stale?: boolean;
 }) {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   useEffect(() => {
-    // Stale gauges don't need a per-second tick (the reset timer is hidden).
-    if (stale) return;
+    // Stale gauges and windows without a scheduled reset don't need a
+    // per-second tick (the reset timer is hidden).
+    if (stale || resetAt == null) return;
     const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(id);
-  }, [stale]);
-  const remaining = Math.max(0, resetAt - now);
+  }, [stale, resetAt]);
+  const remaining = resetAt == null ? null : Math.max(0, resetAt - now);
   const color = colorFor(usedPercent);
   // Time elapsed in the window, as a percent. Clamped: a passed resetAt reads
   // 100%, clock skew (remaining > windowSecs) reads 0%. Null when the window
   // duration is unknown (old snapshots) — then no elapsed bar is drawn.
-  const elapsedPercent = windowSecs
+  const elapsedPercent = windowSecs && remaining != null
     ? Math.min(100, Math.max(0, ((windowSecs - remaining) / windowSecs) * 100))
     : null;
   return (
@@ -44,7 +45,8 @@ export function LimitGauge({ label, usedPercent, resetAt, windowSecs, stale = fa
         <span style={{ color: "#9aa6b8" }}>{label}</span>
         <span>
           <strong>{usedPercent.toFixed(0)}%</strong>
-          {!stale && <> · resets in {fmtCountdown(remaining)}</>}
+          {!stale && remaining != null && <> · resets in {fmtCountdown(remaining)}</>}
+          {!stale && remaining == null && <> · no reset scheduled</>}
         </span>
       </div>
       <div style={{
