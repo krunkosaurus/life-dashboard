@@ -5,8 +5,8 @@ A self-hosted personal dashboard. At a glance it shows:
 - **Life & year progress** — what fraction of your life expectancy you've lived
   (age, years remaining) plus a 12-month strip for the current year, color-coded
   by month, with the live month filling in real time.
-- **AI usage limits** — live Claude Code and Codex rate-limit gauges (5h + weekly
-  windows) with reset countdowns.
+- **AI usage limits** — live Claude Code and Codex rate-limit gauges for every
+  window the account currently exposes, with reset countdowns.
 - **Analytics** — grouped bar charts of recent daily metrics per location (e.g.
   batches/photos generated and prints requested/completed), driven entirely by
   numbers you keep in config.
@@ -366,7 +366,8 @@ minimum 5).
   `account/rateLimits/read` JSON-RPC method — the same call the Codex TUI makes
   for `/status`. (Older versions persisted a `codex.rate_limits` row to
   `~/.codex/logs_2.sqlite`, but Codex >= 0.135 stopped writing it.) Requires the
-  `codex` binary on PATH; if the call fails the panel shows the error.
+  `codex` binary on PATH; Codex can expose one or two windows, and the dashboard
+  renders every usable one. If the call fails, the panel shows the error.
 - **Claude limits** are fetched from Anthropic's OAuth usage endpoint. On macOS the
   token is read from the login Keychain (service `Claude Code-credentials`, which
   the Claude Code CLI keeps current), falling back to `~/.claude/.credentials.json`

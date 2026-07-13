@@ -14,20 +14,43 @@ type AppServerWindow = {
 };
 
 type RateLimitsResult = {
-  rateLimits?: { primary?: AppServerWindow; secondary?: AppServerWindow };
+  rateLimits?: {
+    primary?: AppServerWindow | null;
+    secondary?: AppServerWindow | null;
+  } | null;
 };
 
-// Validate one app-server window has finite numeric fields before trusting it.
-// Fields can be present but null (e.g. before any usage), which would otherwise
-// crash the client at `usedPercent.toFixed`.
-function mapWindow(w: AppServerWindow | undefined, label: string): UsageWindow | null {
+function windowLabel(durationMins: number | null | undefined, fallback: string): string {
+  if (typeof durationMins !== "number" || !Number.isFinite(durationMins) || durationMins <= 0) {
+    return fallback;
+  }
+  if (durationMins === 7 * 24 * 60) return "weekly";
+  if (durationMins % (24 * 60) === 0) return `${durationMins / (24 * 60)}d`;
+  if (durationMins % 60 === 0) return `${durationMins / 60}h`;
+  return `${durationMins}m`;
+}
+
+// Validate one app-server window before trusting it. Current Codex versions
+// make each window and its reset timestamp independently nullable, so a valid
+// utilization can still be displayed when another window (or reset) is absent.
+function mapWindow(w: AppServerWindow | null | undefined, fallbackLabel: string): UsageWindow | null {
   if (!w) return null;
   if (typeof w.usedPercent !== "number" || !Number.isFinite(w.usedPercent)) return null;
-  if (typeof w.resetsAt !== "number" || !Number.isFinite(w.resetsAt)) return null;
-  const win: UsageWindow = { label, usedPercent: w.usedPercent, resetAt: w.resetsAt };
+  if (w.resetsAt != null && (typeof w.resetsAt !== "number" || !Number.isFinite(w.resetsAt))) {
+    return null;
+  }
+  const win: UsageWindow = {
+    label: windowLabel(w.windowDurationMins, fallbackLabel),
+    usedPercent: w.usedPercent,
+  };
+  if (typeof w.resetsAt === "number") win.resetAt = w.resetsAt;
   // Duration can be null/missing (older codex builds); omit windowSecs so the
   // UI simply skips the elapsed bar rather than rendering garbage.
-  if (typeof w.windowDurationMins === "number" && Number.isFinite(w.windowDurationMins)) {
+  if (
+    typeof w.windowDurationMins === "number"
+    && Number.isFinite(w.windowDurationMins)
+    && w.windowDurationMins > 0
+  ) {
     win.windowSecs = w.windowDurationMins * 60;
   }
   return win;
@@ -37,15 +60,16 @@ function mapWindow(w: AppServerWindow | undefined, label: string): UsageWindow |
 // Exported for testing. `snapshotAt` is unix seconds.
 export function parseRateLimitsResult(result: unknown, snapshotAt: number): UsageResult {
   const rl = (result as RateLimitsResult)?.rateLimits;
-  if (!rl?.primary || !rl?.secondary) {
-    return { ok: false, error: "missing primary/secondary rate-limit windows" };
+  if (!rl) {
+    return { ok: false, error: "missing rate-limit snapshot" };
   }
   const primary = mapWindow(rl.primary, "5h");
   const secondary = mapWindow(rl.secondary, "weekly");
-  if (!primary || !secondary) {
-    return { ok: false, error: "primary/secondary window missing numeric usedPercent or resetsAt" };
+  const windows = [primary, secondary].filter((w): w is UsageWindow => w !== null);
+  if (windows.length === 0) {
+    return { ok: false, error: "rate-limit snapshot contains no usable windows" };
   }
-  return { ok: true, snapshotAt, windows: [primary, secondary] };
+  return { ok: true, snapshotAt, windows };
 }
 
 // Each read spawns a `codex app-server` process, so cache briefly to coalesce
