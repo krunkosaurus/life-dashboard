@@ -56,6 +56,91 @@
       }
     ]
   },
+  "liveLog": {
+    "title": "Business Live Log",
+    "windowHours": 48,
+    "maxItems": 60,
+    "auth": {
+      "type": "walletSign",
+      "nonceUrl": "https://api.example.com/auth/nonce",
+      "loginUrl": "https://api.example.com/auth/login",
+      "derive": {
+        "usernameEnv": "LIVELOG_USERNAME",
+        "passwordEnv": "LIVELOG_PASSWORD",
+        "salt": "example-salt",
+        "iterations": 10000
+      },
+      "signature": {
+        "scheme": "eip712",
+        "domain": { "name": "Example App", "version": "1", "chainId": "8453", "verifyingContract": "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC" },
+        "primaryType": "Authentication",
+        "types": {
+          "Authentication": [
+            { "name": "walletAddress", "type": "address" },
+            { "name": "nonce", "type": "string" }
+          ]
+        },
+        "message": { "walletAddress": "${walletAddress}", "nonce": "${nonce}" }
+      },
+      "origin": "https://admin.example.com",
+      "extraBody": { "appSource": "dashboard" }
+    },
+    "stats": [
+      {
+        "api": "https://api.example.com/admin/signups",
+        "params": { "date": "${today}" },
+        "items": [{ "label": "Signups today", "path": "data.count" }]
+      },
+      {
+        "api": "https://api.example.com/admin/subscription-metrics",
+        "items": [
+          { "label": "Active subs", "path": "data.activeCount" },
+          { "label": "MRR", "path": "data.mrr", "format": "usd" },
+          { "label": "Monthly", "path": "data.byPeriod[period=monthly].count" },
+          { "label": "Annual", "path": "data.byPeriod[period=annual].count" }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "signups", "label": "Signup", "color": "#7aa2f7",
+        "api": "https://api.example.com/admin/signups",
+        "params": { "date": "${date}" },
+        "dates": ["${today}", "${yesterday}"],
+        "itemsPath": "data.accounts",
+        "time": "createdAt",
+        "title": "{username}",
+        "detail": "{email} · {country}"
+      },
+      {
+        "id": "purchases", "label": "Purchase", "color": "#34d399",
+        "api": "https://api.example.com/admin/purchases",
+        "params": { "from": "${ymdDaysAgo:2}", "status": "completed", "limit": 50 },
+        "itemsPath": "data.transactions",
+        "time": "createdAt",
+        "title": "{username}",
+        "value": "${amountUsd} · {credits} credits",
+        "badges": [{ "field": "provider" }]
+      },
+      {
+        "id": "subscriptions", "label": "Subscribed", "color": "#a78bfa",
+        "api": "https://api.example.com/admin/subscriptions",
+        "params": { "limit": 30 },
+        "itemsPath": "data.subscriptions",
+        "time": "createdAt",
+        "windowHours": 168,
+        "title": "{username}",
+        "badges": [
+          { "field": "period", "map": { "monthly": "Monthly", "annual": "Annual" }, "color": "#7aa2f7" },
+          { "field": "plan" }
+        ],
+        "variants": [
+          { "when": { "field": "status", "equals": "trialing" }, "label": "Trial started", "color": "#f59e0b" },
+          { "when": { "field": "trialEndsAt", "nonNull": true }, "label": "Trial converted", "color": "#34d399" }
+        ]
+      }
+    ]
+  },
   "checklists": {
     "title": "Daily Checklists",
     "weekStart": "mon",

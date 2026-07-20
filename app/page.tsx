@@ -7,10 +7,11 @@ import { AnniversaryCard } from "@/components/AnniversaryCard";
 import { LifeBar } from "@/components/LifeBar";
 import { AnalyticsPanel } from "@/components/AnalyticsPanel";
 import { ChecklistPanel } from "@/components/ChecklistPanel";
+import { LiveLogPanel } from "@/components/LiveLogPanel";
 import { OuraPanel } from "@/components/OuraPanel";
 import { byPinnedThenMilestone, byPinnedThenSoonest, isAnniversaryEvent } from "@/lib/eventSort";
 import type { ChecklistResult } from "@/lib/checklists";
-import type { AnalyticsResult, EventItem, EventsResult, LifeConfig, OuraResult, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
+import type { AnalyticsResult, EventItem, EventsResult, LifeConfig, LiveLogResult, OuraResult, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
 
 const DEFAULT_REFRESH_MS = 60_000;
 // Each event panel renders at most this many cards (a clean 3×3 grid). The
@@ -51,6 +52,7 @@ export default function Page() {
   const [analytics, setAnalytics] = useState<AnalyticsResult | null>(null);
   const [analyticsWeekOffset, setAnalyticsWeekOffset] = useState(0);
   const [checklists, setChecklists] = useState<ChecklistResult | null>(null);
+  const [liveLog, setLiveLog] = useState<LiveLogResult | null>(null);
   const [oura, setOura] = useState<OuraResult | null>(null);
   const [ouraDayOffset, setOuraDayOffset] = useState(0);
   const [ouraLoading, setOuraLoading] = useState(false);
@@ -67,13 +69,14 @@ export default function Page() {
       ? "/api/oura"
       : `/api/oura?dayOffset=${ouraDayOffset}`;
     const ouraRequest = ++ouraRequestSeq.current;
-    const [c, x, e, s, a, cl, o] = await Promise.all([
+    const [c, x, e, s, a, cl, ll, o] = await Promise.all([
       safeFetch<UsageResult>("/api/usage/claude"),
       safeFetch<UsageResult>("/api/usage/codex"),
       safeFetch<EventsResult>("/api/events"),
       safeFetch<ServersResult>("/api/tailscale"),
       safeFetch<AnalyticsResult>(analyticsUrl),
       safeFetch<ChecklistResult>("/api/checklists"),
+      safeFetch<LiveLogResult>("/api/livelog"),
       safeFetch<OuraResult>(ouraUrl),
     ]);
     setClaude(c as UsageResult);
@@ -82,6 +85,7 @@ export default function Page() {
     setServers(s as ServersResult);
     setAnalytics(a as AnalyticsResult);
     setChecklists(cl as ChecklistResult);
+    setLiveLog(ll as LiveLogResult);
     if (ouraRequest === ouraRequestSeq.current) {
       setOura(o as OuraResult);
       setOuraLoading(false);
@@ -139,6 +143,8 @@ export default function Page() {
         dayOffset={ouraDayOffset}
         onDayOffsetChange={changeOuraDayOffset}
       />
+
+      <LiveLogPanel data={liveLog} />
 
       <div className="grid grid-2">
         <UsagePanel title="Claude Code" data={claude} />

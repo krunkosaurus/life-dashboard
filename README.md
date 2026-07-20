@@ -15,6 +15,10 @@ A self-hosted personal dashboard. At a glance it shows:
   done or missed on any date.
 - **Oura Ring** — last night's sleep summary plus today's step count, fetched
   from Oura's V2 API.
+- **Live log** — a business "what happened overnight" panel: stat tiles plus a
+  merged, reverse-chronological activity feed (e.g. signups, newsletter opt-ins,
+  purchases, trial starts and conversions) pulled from any JSON HTTP endpoints
+  you configure, with optional wallet-signature login.
 - **Servers** — online/offline status of your Tailscale machines.
 - **Countdowns & Anniversaries** — upcoming calendar events and recurring
   birthdays/anniversaries, split into two panels (Countdowns ordered
@@ -356,6 +360,76 @@ The `source` describes any JSON HTTP endpoint that returns one row per day
 Malformed entries are dropped defensively, and non-numeric values become `0`.
 Omit `analytics` entirely to hide the panel.
 
+### Live log (activity feed)
+
+**`liveLog`** renders a morning-review panel: a row of stat tiles plus a single
+reverse-chronological feed merged from any number of JSON HTTP sources (think
+signups, purchases, subscription starts). Like `analytics`, it is fully
+config-driven — the committed code knows nothing about any particular vendor;
+your endpoints, field mappings, and credentials live only in the gitignored
+`config.local.json` / `.env.local`. See `config.example.json` for a complete
+sample block.
+
+Top-level: `title`, `windowHours` (feed lookback, default 48), `maxItems`
+(merged cap, default 60), optional `auth`, `stats`, and `sources`.
+
+**Stats** — each group is `{ api, params?, items }`; every item reads one number
+from the group's JSON response via `path` and renders a tile. Paths are dotted
+and may select from arrays: `"data.byPeriod[period=monthly].count"`. `format`
+is `"number"` (default), `"usd"`, or `"percent"` (values ≤ 1 are treated as
+fractions).
+
+**Sources** — each is one feed: `{ id, label, color?, api, params?, dates?,
+itemsPath, time, title?, detail?, value?, badges?, variants?, windowHours?,
+limit? }`.
+
+- `itemsPath` — dotted path to the response's row array (envelope-agnostic).
+- `time` — row field holding the timestamp; unix seconds, milliseconds, and ISO
+  strings are auto-detected. Rows outside the window are dropped.
+- `title` / `detail` / `value` — `"{field}"` templates (dotted paths allowed);
+  parts separated by `" · "` collapse cleanly when a field is missing. `value`
+  renders right-aligned (e.g. `"${amountUsd} · {credits} credits"`).
+- `badges` — chips per row: `{ field, map?, color? }`. With `map`, only mapped
+  values render (e.g. `{ "monthly": "Monthly", "annual": "Annual" }`); without
+  it the raw value is shown.
+- `variants` — reclassify rows: first match of
+  `{ when: { field, equals? | nonNull? }, label?, color? }` overrides the row's
+  label/color (e.g. `status = trialing` → "Trial started").
+- `dates` — fan out one request per entry, substituting `${date}` into `params`
+  (for day-bucketed endpoints: `["${today}", "${yesterday}"]`).
+
+Param values and `dates` accept UTC time tokens: `${today}`, `${yesterday}`,
+`${ymdDaysAgo:N}`, `${isoDaysAgo:N}`, `${epochDaysAgo:N}`, `${nowIso}`.
+
+**Auth** (optional) — `"type": "walletSign"` performs a wallet-signature login
+(the flow used by web3-style admin APIs): fetch a nonce from `nonceUrl`, sign
+it, POST to `loginUrl`, read a bearer token at `tokenPath` (default
+`"data.token"`). The signing key comes from one of:
+
+- `privateKeyEnv` — env var *name* holding a raw 32-byte hex key, or
+- `derive` — `{ usernameEnv, passwordEnv, salt, iterations?,
+  lowercaseUsername? }`: the key is PBKDF2-SHA256-derived from
+  username+password (the "credentials wallet" pattern), so `.env.local` holds
+  ordinary credentials instead of an exported key.
+
+`walletAddress` is optional — when omitted it is computed (EIP-55 checksummed)
+from the key. The signature is EIP-191 `personal_sign` by default; set
+`signature` to `{ "scheme": "eip712", domain, primaryType, types, message }`
+for APIs that verify EIP-712 typed data (field types `address` / `string` /
+`uint256`; `message` values may use `${nonce}` and `${walletAddress}`). Both
+schemes are test-locked against ethers v6 vectors. The token is cached in
+`.cache/livelog-session.json` (`0600`), auto-renewed before expiry, and
+re-obtained once on a 401/403. `origin` is sent as `Origin`/`Referer` for APIs
+that allowlist calling origins; `extraBody` is merged into the login POST. Omit
+`auth` entirely for public endpoints.
+
+Failure handling matches the other panels: each source/stat group fails
+independently (amber inline notice), successful fetches are cached server-side
+for 60s, and the last healthy payload is kept in
+`.cache/livelog-last-good.json` so an API outage shows stale data (dimmed, with
+a "stale" footer) instead of a blank panel. Omit `liveLog` entirely to hide the
+panel.
+
 ### Refresh
 
 **`refreshSeconds`** controls the dashboard's polling interval (default 60,
@@ -375,6 +449,11 @@ minimum 5).
   never reaches the browser, and is auto-refreshed when expired (backing off on
   `Retry-After` when rate limited). Recent fetch failures are logged per source in
   a collapsible list under each gauge.
+- **Live log** events come from whatever JSON HTTP endpoints `liveLog` names in
+  `config.local.json`, fetched server-side in parallel with a 10s timeout, cached
+  per source for 60s, and merged into one feed. Auth (when configured) is a
+  wallet-signature login whose bearer token stays server-side in
+  `.cache/livelog-session.json`; the signing key never leaves `.env.local`.
 - **Servers** come from the local `tailscale` CLI (see above), cached briefly.
 - **Oura Ring** comes from Oura API V2: `daily_sleep` and `sleep` for last
   night's sleep, `daily_activity` for today's steps, and `heartrate` for an
@@ -385,7 +464,9 @@ minimum 5).
 ## Security
 The server binds to `127.0.0.1` only. `config.local.json`, `.env*.local`, and
 `.cache/` are gitignored because they can contain private calendar URLs, OAuth
-client secrets, and user tokens. OAuth tokens never leave the server.
+client secrets, user tokens, private admin API endpoints, and the live log's
+signing key or credentials. OAuth/bearer tokens never leave the server. If you
+configure `liveLog` auth, prefer a dedicated account/key that holds no funds.
 
 ## Tests
 ```bash
