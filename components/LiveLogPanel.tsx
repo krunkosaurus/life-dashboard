@@ -129,8 +129,15 @@ function EventList({ events, now }: { events: LiveLogEvent[]; now: Date }) {
 }
 
 function EventRow({ event: e, nowS }: { event: LiveLogEvent; nowS: number }) {
+  const clock = new Date(e.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "4px 0", minWidth: 0 }}>
+      <span
+        style={{ width: 62, flexShrink: 0, fontSize: 11, color: "#7a8595", fontVariantNumeric: "tabular-nums", textAlign: "right" }}
+        title={`${shortAge(Math.max(0, nowS - e.time))} ago`}
+      >
+        {clock}
+      </span>
       <span
         style={{ width: 7, height: 7, borderRadius: "50%", background: e.color, flexShrink: 0, alignSelf: "center" }}
       />
@@ -157,12 +164,9 @@ function EventRow({ event: e, nowS }: { event: LiveLogEvent; nowS: number }) {
           <span style={{ fontSize: 11, color: "#7a8595", overflowWrap: "anywhere" }}>{e.detail}</span>
         )}
       </span>
-      <span style={{ flexShrink: 0, display: "flex", alignItems: "baseline", gap: 8 }}>
-        {e.value && <span style={{ fontSize: 12, fontWeight: 600, color: "#cdd5e1" }}>{e.value}</span>}
-        <span style={{ fontSize: 11, color: "#7a8595", width: 30, textAlign: "right" }}>
-          {shortAge(Math.max(0, nowS - e.time))}
-        </span>
-      </span>
+      {e.value && (
+        <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, color: "#cdd5e1" }}>{e.value}</span>
+      )}
     </div>
   );
 }

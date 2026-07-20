@@ -14,9 +14,11 @@ import type {
   LifeConfig,
   LiveLogAuthInput,
   LiveLogBadgeInput,
+  LiveLogCondition,
   LiveLogConfig,
   LiveLogDeriveInput,
   LiveLogEip712Input,
+  LiveLogEnrichInput,
   LiveLogSignatureInput,
   LiveLogSourceInput,
   LiveLogStatFormat,
@@ -274,6 +276,47 @@ function parseLiveLogStats(input: unknown): LiveLogStatGroupInput[] {
   });
 }
 
+// Accept a single condition or an array; drop any that test nothing.
+function parseLiveLogConditions(input: unknown): LiveLogCondition[] {
+  const list = Array.isArray(input) ? input : input == null ? [] : [input];
+  return list.flatMap((c): LiveLogCondition[] => {
+    if (!c || typeof c !== "object" || Array.isArray(c)) return [];
+    const o = c as Record<string, unknown>;
+    if (typeof o.field !== "string" || o.field.trim() === "") return [];
+    const cond: LiveLogCondition = { field: o.field.trim() };
+    if (typeof o.equals === "string" || typeof o.equals === "number" || typeof o.equals === "boolean") {
+      cond.equals = o.equals;
+    }
+    if (Array.isArray(o.in)) {
+      const values = o.in.filter(
+        (v): v is string | number | boolean =>
+          typeof v === "string" || typeof v === "number" || typeof v === "boolean"
+      );
+      if (values.length > 0) cond.in = values;
+    }
+    if (typeof o.nonNull === "boolean") cond.nonNull = o.nonNull;
+    if (cond.equals === undefined && cond.in === undefined && cond.nonNull === undefined) return [];
+    return [cond];
+  });
+}
+
+function parseLiveLogEnrich(input: unknown): LiveLogEnrichInput | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const o = input as Record<string, unknown>;
+  if (typeof o.api !== "string" || o.api.trim() === "") return null;
+  if (typeof o.key !== "string" || o.key.trim() === "") return null;
+  if (!o.fields || typeof o.fields !== "object" || Array.isArray(o.fields)) return null;
+  const fields: Record<string, string> = {};
+  for (const [name, path] of Object.entries(o.fields as Record<string, unknown>)) {
+    if (typeof path === "string" && path.trim() !== "") fields[name] = path.trim();
+  }
+  if (Object.keys(fields).length === 0) return null;
+  const enrich: LiveLogEnrichInput = { api: o.api.trim(), key: o.key.trim(), fields };
+  if (typeof o.ttlHours === "number" && Number.isFinite(o.ttlHours) && o.ttlHours > 0) enrich.ttlHours = o.ttlHours;
+  if (typeof o.max === "number" && Number.isFinite(o.max) && o.max > 0) enrich.max = Math.floor(o.max);
+  return enrich;
+}
+
 function parseLiveLogSources(input: unknown): LiveLogSourceInput[] {
   if (!Array.isArray(input)) return [];
   return input.flatMap((s): LiveLogSourceInput[] => {
@@ -321,17 +364,9 @@ function parseLiveLogSources(input: unknown): LiveLogSourceInput[] {
       const variants = o.variants.flatMap((v): LiveLogVariantInput[] => {
         if (!v || typeof v !== "object") return [];
         const vo = v as Record<string, unknown>;
-        const when = vo.when;
-        if (!when || typeof when !== "object" || Array.isArray(when)) return [];
-        const wo = when as Record<string, unknown>;
-        if (typeof wo.field !== "string" || wo.field.trim() === "") return [];
-        const cond: LiveLogVariantInput["when"] = { field: wo.field.trim() };
-        if (typeof wo.equals === "string" || typeof wo.equals === "number" || typeof wo.equals === "boolean") {
-          cond.equals = wo.equals;
-        }
-        if (typeof wo.nonNull === "boolean") cond.nonNull = wo.nonNull;
-        if (cond.equals === undefined && cond.nonNull === undefined) return [];
-        const variant: LiveLogVariantInput = { when: cond };
+        const conditions = parseLiveLogConditions(vo.when);
+        if (conditions.length === 0) return [];
+        const variant: LiveLogVariantInput = { when: conditions };
         if (typeof vo.label === "string" && vo.label.trim() !== "") variant.label = vo.label.trim();
         if (typeof vo.color === "string" && vo.color.trim() !== "") variant.color = vo.color.trim();
         if (variant.label === undefined && variant.color === undefined) return [];
@@ -339,6 +374,12 @@ function parseLiveLogSources(input: unknown): LiveLogSourceInput[] {
       });
       if (variants.length > 0) source.variants = variants;
     }
+    const require = parseLiveLogConditions(o.require);
+    if (require.length > 0) source.require = require;
+    const exclude = parseLiveLogConditions(o.exclude);
+    if (exclude.length > 0) source.exclude = exclude;
+    const enrich = parseLiveLogEnrich(o.enrich);
+    if (enrich) source.enrich = enrich;
     if (typeof o.windowHours === "number" && Number.isFinite(o.windowHours) && o.windowHours > 0) {
       source.windowHours = o.windowHours;
     }
