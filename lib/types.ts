@@ -196,6 +196,147 @@ export type AnalyticsResult =
   | { ok: true; analytics: AnalyticsResolved }
   | { ok: false; error: string };
 
+// ---- Live log: config-file (template) shape, produced by parseConfig ----
+
+// Derive a secp256k1 signing key from username+password credentials via
+// PBKDF2-SHA256 (the common web3 "credentials wallet" pattern). Only the env
+// var NAMES live in config; the values stay in .env.local.
+export type LiveLogDeriveInput = {
+  usernameEnv: string;
+  passwordEnv: string;
+  salt: string;
+  iterations?: number;          // default 10000
+  lowercaseUsername?: boolean;  // default true
+};
+
+// EIP-712 typed-data signing of the login nonce. `types` describes one flat
+// struct (field types: address | string | uint256); `message` values are
+// templates that may use ${nonce} and ${walletAddress}.
+export type LiveLogEip712Input = {
+  scheme: "eip712";
+  domain: { name?: string; version?: string; chainId?: string | number; verifyingContract?: string };
+  primaryType: string;
+  types: Record<string, { name: string; type: string }[]>;
+  message: Record<string, string>;
+};
+
+export type LiveLogSignatureInput = { scheme: "personal" } | LiveLogEip712Input;
+
+// Wallet-signature login: fetch a nonce, sign it (EIP-191 personal_sign by
+// default, or EIP-712 via `signature`), POST the signature to `loginUrl`, and
+// read a bearer token out of the response at `tokenPath`. The key comes from
+// `privateKeyEnv` or is derived from credentials via `derive`. Everything is
+// config-driven so no vendor specifics live in code.
+export type LiveLogAuthInput = {
+  type: "walletSign";
+  nonceUrl: string;
+  loginUrl: string;
+  walletAddress?: string;                   // optional; derived from the key when absent
+  privateKeyEnv?: string;                   // env var NAME holding the hex signing key
+  derive?: LiveLogDeriveInput;              // alternative to privateKeyEnv
+  signature?: LiveLogSignatureInput;        // default { scheme: "personal" }
+  origin?: string;                          // sent as Origin/Referer — for APIs that key off it
+  extraBody?: Record<string, string | number | boolean>; // merged into the login body
+  noncePath?: string;                       // response path to the nonce (default "data.nonce")
+  tokenPath?: string;                       // response path to the token (default "data.token")
+};
+
+export type LiveLogStatFormat = "number" | "usd" | "percent";
+
+export type LiveLogStatItemInput = {
+  label: string;
+  path: string;                // dotted response path, e.g. "data.total.count" or "data.byTerm[term=monthly].count"
+  format?: LiveLogStatFormat;  // default "number"
+};
+
+// One endpoint that yields one or more stat tiles.
+export type LiveLogStatGroupInput = {
+  api: string;
+  params?: Record<string, string | number>; // values may use ${...} tokens
+  items: LiveLogStatItemInput[];
+};
+
+// A chip rendered on a feed row. With `map`, the field's value is translated
+// (and unmapped values render no chip); without it the raw value is shown.
+export type LiveLogBadgeInput = {
+  field: string;
+  map?: Record<string, string>;
+  color?: string;
+};
+
+// Reclassify a row when a field matches: first matching variant overrides the
+// row's label/color (e.g. status=trialing → "Trial started").
+export type LiveLogVariantInput = {
+  when: { field: string; equals?: string | number | boolean; nonNull?: boolean };
+  label?: string;
+  color?: string;
+};
+
+export type LiveLogSourceInput = {
+  id: string;
+  label: string;            // row label ("Signup"); variants may override
+  color?: string;           // row dot/label tint
+  api: string;
+  params?: Record<string, string | number>; // values may use ${...} tokens
+  dates?: string[];         // fan-out: one request per entry, substituting ${date}
+  itemsPath: string;        // response path to the row array
+  time: string;             // row field holding the timestamp (s / ms / ISO auto-detected)
+  title?: string;           // "{field}" templates; missing fields collapse cleanly
+  detail?: string;
+  value?: string;           // right-aligned text (e.g. "${amountInDollars} · {amountInTokens}⚡")
+  badges?: LiveLogBadgeInput[];
+  variants?: LiveLogVariantInput[];
+  windowHours?: number;     // override the feed-wide window for this source
+  limit?: number;           // per-source row cap after sorting (default 50)
+};
+
+export type LiveLogConfig = {
+  title: string;            // panel title; defaults to "Live Log"
+  windowHours: number;      // feed window (default 48)
+  maxItems: number;         // merged feed cap (default 60)
+  auth: LiveLogAuthInput | null;
+  stats: LiveLogStatGroupInput[];
+  sources: LiveLogSourceInput[];
+};
+
+// ---- Live log: resolved (client-facing) shape, produced by getLiveLog ----
+
+export type LiveLogStat = {
+  label: string;
+  value: string;            // pre-formatted server-side ("1,204", "$318.40", "18.2%", "—")
+};
+
+export type LiveLogBadge = { text: string; color?: string };
+
+export type LiveLogEvent = {
+  id: string;               // unique per row (sourceId + time + title + index)
+  sourceId: string;
+  label: string;
+  color: string;
+  time: number;             // unix seconds
+  title: string;
+  detail?: string;
+  value?: string;
+  badges: LiveLogBadge[];
+};
+
+export type LiveLogSourceError = { id: string; label: string; error: string };
+
+export type LiveLogResult =
+  | {
+      ok: true;
+      title: string;
+      stats: LiveLogStat[];
+      events: LiveLogEvent[];
+      sourceErrors: LiveLogSourceError[];
+      checkedAt: number;    // unix seconds
+      windowHours: number;
+      stale?: boolean;      // true when any part was served from the last-good snapshot
+      staleReason?: string;
+      failures?: UsageFailure[];
+    }
+  | { ok: false; error: string; hidden?: boolean; failures?: UsageFailure[] };
+
 export type AppConfig = {
   icsUrl: string | null;
   manualEvents: ManualEventInput[];
@@ -206,4 +347,5 @@ export type AppConfig = {
   tailscaleHosts: TailscaleHostInput[];
   analytics: AnalyticsConfig | null; // parsed template; resolved by getAnalytics
   checklists: ChecklistConfig | null; // parsed template; resolved by resolveChecklist
+  liveLog: LiveLogConfig | null;      // parsed template; resolved by getLiveLog
 };

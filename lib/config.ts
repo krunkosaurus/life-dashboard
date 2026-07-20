@@ -12,6 +12,16 @@ import type {
   AppConfig,
   BirthdayInput,
   LifeConfig,
+  LiveLogAuthInput,
+  LiveLogBadgeInput,
+  LiveLogConfig,
+  LiveLogDeriveInput,
+  LiveLogEip712Input,
+  LiveLogSignatureInput,
+  LiveLogSourceInput,
+  LiveLogStatFormat,
+  LiveLogStatGroupInput,
+  LiveLogVariantInput,
   ManualEventInput,
   TailscaleHostInput,
 } from "./types";
@@ -133,6 +143,233 @@ function parseAnalytics(input: unknown): AnalyticsConfig | null {
   return { title, days, ...(locationLayout ? { locationLayout } : {}), locations };
 }
 
+const LIVELOG_STAT_FORMATS = new Set<LiveLogStatFormat>(["number", "usd", "percent"]);
+const LIVELOG_DEFAULT_WINDOW_HOURS = 48;
+const LIVELOG_DEFAULT_MAX_ITEMS = 60;
+
+function parseStringRecord(input: unknown): Record<string, string | number> | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const out: Record<string, string | number> = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (typeof v === "string" || typeof v === "number") out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function parseLiveLogDerive(input: unknown): LiveLogDeriveInput | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const o = input as Record<string, unknown>;
+  for (const key of ["usernameEnv", "passwordEnv", "salt"]) {
+    if (typeof o[key] !== "string" || (o[key] as string).trim() === "") return null;
+  }
+  const derive: LiveLogDeriveInput = {
+    usernameEnv: (o.usernameEnv as string).trim(),
+    passwordEnv: (o.passwordEnv as string).trim(),
+    salt: o.salt as string,
+  };
+  if (typeof o.iterations === "number" && Number.isFinite(o.iterations) && o.iterations > 0) {
+    derive.iterations = Math.floor(o.iterations);
+  }
+  if (typeof o.lowercaseUsername === "boolean") derive.lowercaseUsername = o.lowercaseUsername;
+  return derive;
+}
+
+function parseLiveLogSignature(input: unknown): LiveLogSignatureInput | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const o = input as Record<string, unknown>;
+  if (o.scheme === "personal") return { scheme: "personal" };
+  if (o.scheme !== "eip712") return null;
+  if (!o.domain || typeof o.domain !== "object" || Array.isArray(o.domain)) return null;
+  if (typeof o.primaryType !== "string" || o.primaryType.trim() === "") return null;
+  if (!o.types || typeof o.types !== "object" || Array.isArray(o.types)) return null;
+  if (!o.message || typeof o.message !== "object" || Array.isArray(o.message)) return null;
+  const domainRaw = o.domain as Record<string, unknown>;
+  const domain: LiveLogEip712Input["domain"] = {};
+  if (typeof domainRaw.name === "string") domain.name = domainRaw.name;
+  if (typeof domainRaw.version === "string") domain.version = domainRaw.version;
+  if (typeof domainRaw.chainId === "string" || typeof domainRaw.chainId === "number") domain.chainId = domainRaw.chainId;
+  if (typeof domainRaw.verifyingContract === "string") domain.verifyingContract = domainRaw.verifyingContract;
+  const types: LiveLogEip712Input["types"] = {};
+  for (const [name, fields] of Object.entries(o.types as Record<string, unknown>)) {
+    if (!Array.isArray(fields)) continue;
+    const parsed = fields.flatMap(f => {
+      if (!f || typeof f !== "object") return [];
+      const fo = f as Record<string, unknown>;
+      if (typeof fo.name !== "string" || typeof fo.type !== "string") return [];
+      return [{ name: fo.name, type: fo.type }];
+    });
+    if (parsed.length > 0) types[name] = parsed;
+  }
+  const message: Record<string, string> = {};
+  for (const [k, v] of Object.entries(o.message as Record<string, unknown>)) {
+    if (typeof v === "string") message[k] = v;
+  }
+  if (!types[o.primaryType.trim()] || Object.keys(message).length === 0) return null;
+  return { scheme: "eip712", domain, primaryType: o.primaryType.trim(), types, message };
+}
+
+function parseLiveLogAuth(input: unknown): LiveLogAuthInput | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const o = input as Record<string, unknown>;
+  if (o.type !== "walletSign") return null;
+  for (const key of ["nonceUrl", "loginUrl"]) {
+    if (typeof o[key] !== "string" || (o[key] as string).trim() === "") return null;
+  }
+  const privateKeyEnv =
+    typeof o.privateKeyEnv === "string" && o.privateKeyEnv.trim() !== "" ? o.privateKeyEnv.trim() : undefined;
+  const derive = parseLiveLogDerive(o.derive);
+  // A usable auth block needs some way to obtain the signing key.
+  if (!privateKeyEnv && !derive) return null;
+  const auth: LiveLogAuthInput = {
+    type: "walletSign",
+    nonceUrl: (o.nonceUrl as string).trim(),
+    loginUrl: (o.loginUrl as string).trim(),
+  };
+  if (privateKeyEnv) auth.privateKeyEnv = privateKeyEnv;
+  else if (derive) auth.derive = derive;
+  if (typeof o.walletAddress === "string" && o.walletAddress.trim() !== "") {
+    auth.walletAddress = o.walletAddress.trim();
+  }
+  const signature = parseLiveLogSignature(o.signature);
+  if (signature) auth.signature = signature;
+  if (typeof o.origin === "string" && o.origin.trim() !== "") auth.origin = o.origin.trim();
+  if (typeof o.noncePath === "string" && o.noncePath.trim() !== "") auth.noncePath = o.noncePath.trim();
+  if (typeof o.tokenPath === "string" && o.tokenPath.trim() !== "") auth.tokenPath = o.tokenPath.trim();
+  if (o.extraBody && typeof o.extraBody === "object" && !Array.isArray(o.extraBody)) {
+    const extra: Record<string, string | number | boolean> = {};
+    for (const [k, v] of Object.entries(o.extraBody as Record<string, unknown>)) {
+      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") extra[k] = v;
+    }
+    if (Object.keys(extra).length > 0) auth.extraBody = extra;
+  }
+  return auth;
+}
+
+function parseLiveLogStats(input: unknown): LiveLogStatGroupInput[] {
+  if (!Array.isArray(input)) return [];
+  return input.flatMap((g): LiveLogStatGroupInput[] => {
+    if (!g || typeof g !== "object") return [];
+    const o = g as Record<string, unknown>;
+    if (typeof o.api !== "string" || o.api.trim() === "") return [];
+    const itemsRaw = Array.isArray(o.items) ? o.items : [];
+    const items = itemsRaw.flatMap((it): LiveLogStatGroupInput["items"] => {
+      if (!it || typeof it !== "object") return [];
+      const io = it as Record<string, unknown>;
+      if (typeof io.label !== "string" || io.label.trim() === "") return [];
+      if (typeof io.path !== "string" || io.path.trim() === "") return [];
+      const item: LiveLogStatGroupInput["items"][number] = {
+        label: io.label.trim(),
+        path: io.path.trim(),
+      };
+      if (typeof io.format === "string" && LIVELOG_STAT_FORMATS.has(io.format as LiveLogStatFormat)) {
+        item.format = io.format as LiveLogStatFormat;
+      }
+      return [item];
+    });
+    if (items.length === 0) return [];
+    const group: LiveLogStatGroupInput = { api: o.api.trim(), items };
+    const params = parseStringRecord(o.params);
+    if (params) group.params = params;
+    return [group];
+  });
+}
+
+function parseLiveLogSources(input: unknown): LiveLogSourceInput[] {
+  if (!Array.isArray(input)) return [];
+  return input.flatMap((s): LiveLogSourceInput[] => {
+    if (!s || typeof s !== "object") return [];
+    const o = s as Record<string, unknown>;
+    for (const key of ["id", "label", "api", "itemsPath", "time"]) {
+      if (typeof o[key] !== "string" || (o[key] as string).trim() === "") return [];
+    }
+    const source: LiveLogSourceInput = {
+      id: (o.id as string).trim(),
+      label: (o.label as string).trim(),
+      api: (o.api as string).trim(),
+      itemsPath: (o.itemsPath as string).trim(),
+      time: (o.time as string).trim(),
+    };
+    if (typeof o.color === "string" && o.color.trim() !== "") source.color = o.color.trim();
+    for (const key of ["title", "detail", "value"] as const) {
+      if (typeof o[key] === "string" && (o[key] as string).trim() !== "") source[key] = (o[key] as string).trim();
+    }
+    const params = parseStringRecord(o.params);
+    if (params) source.params = params;
+    if (Array.isArray(o.dates)) {
+      const dates = o.dates.filter((d): d is string => typeof d === "string" && d.trim() !== "");
+      if (dates.length > 0) source.dates = dates;
+    }
+    if (Array.isArray(o.badges)) {
+      const badges = o.badges.flatMap((b): LiveLogBadgeInput[] => {
+        if (!b || typeof b !== "object") return [];
+        const bo = b as Record<string, unknown>;
+        if (typeof bo.field !== "string" || bo.field.trim() === "") return [];
+        const badge: LiveLogBadgeInput = { field: bo.field.trim() };
+        if (typeof bo.color === "string" && bo.color.trim() !== "") badge.color = bo.color.trim();
+        if (bo.map && typeof bo.map === "object" && !Array.isArray(bo.map)) {
+          const map: Record<string, string> = {};
+          for (const [k, v] of Object.entries(bo.map as Record<string, unknown>)) {
+            if (typeof v === "string") map[k] = v;
+          }
+          if (Object.keys(map).length > 0) badge.map = map;
+        }
+        return [badge];
+      });
+      if (badges.length > 0) source.badges = badges;
+    }
+    if (Array.isArray(o.variants)) {
+      const variants = o.variants.flatMap((v): LiveLogVariantInput[] => {
+        if (!v || typeof v !== "object") return [];
+        const vo = v as Record<string, unknown>;
+        const when = vo.when;
+        if (!when || typeof when !== "object" || Array.isArray(when)) return [];
+        const wo = when as Record<string, unknown>;
+        if (typeof wo.field !== "string" || wo.field.trim() === "") return [];
+        const cond: LiveLogVariantInput["when"] = { field: wo.field.trim() };
+        if (typeof wo.equals === "string" || typeof wo.equals === "number" || typeof wo.equals === "boolean") {
+          cond.equals = wo.equals;
+        }
+        if (typeof wo.nonNull === "boolean") cond.nonNull = wo.nonNull;
+        if (cond.equals === undefined && cond.nonNull === undefined) return [];
+        const variant: LiveLogVariantInput = { when: cond };
+        if (typeof vo.label === "string" && vo.label.trim() !== "") variant.label = vo.label.trim();
+        if (typeof vo.color === "string" && vo.color.trim() !== "") variant.color = vo.color.trim();
+        if (variant.label === undefined && variant.color === undefined) return [];
+        return [variant];
+      });
+      if (variants.length > 0) source.variants = variants;
+    }
+    if (typeof o.windowHours === "number" && Number.isFinite(o.windowHours) && o.windowHours > 0) {
+      source.windowHours = o.windowHours;
+    }
+    if (typeof o.limit === "number" && Number.isFinite(o.limit) && o.limit > 0) {
+      source.limit = Math.floor(o.limit);
+    }
+    return [source];
+  });
+}
+
+// Validate a `liveLog` block defensively, mirroring analytics: drop anything
+// malformed and return null when nothing usable survives, so an absent or
+// broken block simply hides the panel rather than erroring.
+function parseLiveLog(input: unknown): LiveLogConfig | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const o = input as Record<string, unknown>;
+  const stats = parseLiveLogStats(o.stats);
+  const sources = parseLiveLogSources(o.sources);
+  if (stats.length === 0 && sources.length === 0) return null;
+  const title = typeof o.title === "string" && o.title.trim() !== "" ? o.title.trim() : "Live Log";
+  const windowHours =
+    typeof o.windowHours === "number" && Number.isFinite(o.windowHours) && o.windowHours > 0
+      ? o.windowHours
+      : LIVELOG_DEFAULT_WINDOW_HOURS;
+  const maxItems =
+    typeof o.maxItems === "number" && Number.isFinite(o.maxItems) && o.maxItems > 0
+      ? Math.floor(o.maxItems)
+      : LIVELOG_DEFAULT_MAX_ITEMS;
+  return { title, windowHours, maxItems, auth: parseLiveLogAuth(o.auth), stats, sources };
+}
+
 export function parseConfig(
   file: Record<string, unknown>,
   env: Record<string, string | undefined>
@@ -204,8 +441,9 @@ export function parseConfig(
 
   const analytics = parseAnalytics(file.analytics);
   const checklists = parseChecklists(file.checklists);
+  const liveLog = parseLiveLog(file.liveLog);
 
-  return { icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life, tailscaleHosts, analytics, checklists };
+  return { icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life, tailscaleHosts, analytics, checklists, liveLog };
 }
 
 export function loadConfig(): AppConfig {
