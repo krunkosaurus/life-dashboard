@@ -8,6 +8,7 @@ import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import {
   addressFromPrivateKey,
   applyVariants,
+  conditionMatches,
   decodeJwtExp,
   deriveWalletKey,
   extractStats,
@@ -21,6 +22,7 @@ import {
   resetLiveLogStateForTests,
   resolveBadges,
   resolvePath,
+  selectSourceRowsWithStats,
   signTypedData,
   substituteTokens,
 } from "../livelog";
@@ -155,6 +157,29 @@ describe("applyVariants / resolveBadges", () => {
     expect(applyVariants(source, { status: "active" }, "#000")).toEqual({ label: "Signup", color: "#111111" });
   });
 
+  it("requires every condition in a multi-condition variant (no cancelled-as-converted)", () => {
+    const multi = makeSource({
+      label: "Subscribed",
+      color: "#a78bfa",
+      variants: [
+        { when: [{ field: "status", equals: "trialing" }], label: "Trial started", color: "#f59e0b" },
+        {
+          when: [{ field: "status", in: ["active", "grace"] }, { field: "trialEnd", nonNull: true }],
+          label: "Converted",
+          color: "#34d399",
+        },
+        { when: [{ field: "status", in: ["cancelled", "expired"] }], label: "Cancelled", color: "#f87171" },
+      ],
+    });
+    // A cancelled subscription that once had a trial must NOT read as a conversion.
+    expect(applyVariants(multi, { status: "cancelled", trialEnd: "2026-07-01" }, "#000").label).toBe("Cancelled");
+    expect(applyVariants(multi, { status: "active", trialEnd: "2026-07-01" }, "#000").label).toBe("Converted");
+    expect(applyVariants(multi, { status: "grace", trialEnd: "2026-07-01" }, "#000").label).toBe("Converted");
+    // Active with no trial history is a direct subscribe, not a conversion.
+    expect(applyVariants(multi, { status: "active", trialEnd: null }, "#000").label).toBe("Subscribed");
+    expect(applyVariants(multi, { status: "active", trialEnd: "" }, "#000").label).toBe("Subscribed");
+  });
+
   it("maps badge values, skips unmapped and missing fields, shows raw without a map", () => {
     expect(resolveBadges(source, { term: "monthly", provider: "stripe" })).toEqual([
       { text: "Monthly", color: "#7aa2f7" },
@@ -188,6 +213,83 @@ describe("normalizeSourceRows", () => {
     const src = makeSource();
     const events = normalizeSourceRows(src, [{ created: NOW_S - 3 * 3600 }], NOW, 2);
     expect(events).toEqual([]);
+  });
+});
+
+describe("row gates (require / exclude)", () => {
+  it("keeps only rows satisfying every require condition", () => {
+    const source = makeSource({
+      title: "{user}",
+      require: [
+        { field: "status", in: ["completed"] },
+        { field: "env", equals: "production" },
+      ],
+    });
+    const rows = [
+      { user: "real", status: "completed", env: "production", created: NOW_S - 60 },
+      { user: "failed", status: "failed", env: "production", created: NOW_S - 61 },
+      { user: "abandoned", status: "initiated", env: "production", created: NOW_S - 62 },
+      { user: "sandbox", status: "completed", env: "sandbox", created: NOW_S - 63 },
+      { user: "unknown", created: NOW_S - 64 },
+    ];
+    expect(normalizeSourceRows(source, rows, NOW, 48).map(e => e.title)).toEqual(["real"]);
+  });
+
+  it("drops rows matching any exclude condition", () => {
+    const source = makeSource({
+      title: "{user}",
+      exclude: [{ field: "test", equals: true }, { field: "status", in: ["refunded"] }],
+    });
+    const rows = [
+      { user: "keep", created: NOW_S - 60 },
+      { user: "tester", test: true, created: NOW_S - 61 },
+      { user: "refund", status: "refunded", created: NOW_S - 62 },
+    ];
+    expect(normalizeSourceRows(source, rows, NOW, 48).map(e => e.title)).toEqual(["keep"]);
+  });
+
+  it("gates rows before the per-source limit so real rows are not crowded out", () => {
+    const source = makeSource({
+      title: "{user}",
+      limit: 2,
+      require: [{ field: "status", equals: "completed" }],
+    });
+    const rows = [
+      { user: "junk1", status: "failed", created: NOW_S - 10 },
+      { user: "junk2", status: "failed", created: NOW_S - 20 },
+      { user: "good1", status: "completed", created: NOW_S - 30 },
+      { user: "good2", status: "completed", created: NOW_S - 40 },
+    ];
+    expect(normalizeSourceRows(source, rows, NOW, 48).map(e => e.title)).toEqual(["good1", "good2"]);
+  });
+
+  it("matches conditions on stringified values and treats empty strings as absent", () => {
+    expect(conditionMatches({ n: 5 }, { field: "n", equals: "5" })).toBe(true);
+    expect(conditionMatches({ n: 5 }, { field: "n", in: [4, 5] })).toBe(true);
+    expect(conditionMatches({ n: 5 }, { field: "n", in: [4] })).toBe(false);
+    expect(conditionMatches({ v: "" }, { field: "v", nonNull: true })).toBe(false);
+    expect(conditionMatches({ v: null }, { field: "v", nonNull: false })).toBe(true);
+    expect(conditionMatches({}, { field: "missing", nonNull: false })).toBe(true);
+  });
+
+  it("compares enum-ish values case-insensitively", () => {
+    // An API that answers "Production" to a ?storeEnvironment=production query
+    // must not silently empty the feed.
+    expect(conditionMatches({ env: "Production" }, { field: "env", in: ["production"] })).toBe(true);
+    expect(conditionMatches({ env: "COMPLETED" }, { field: "env", equals: "completed" })).toBe(true);
+    expect(conditionMatches({ env: "sandbox" }, { field: "env", in: ["production"] })).toBe(false);
+  });
+
+  it("reports how many rows the gates removed", () => {
+    const source = makeSource({ require: [{ field: "status", equals: "completed" }] });
+    const rows = [
+      { status: "failed", created: NOW_S - 10 },
+      { status: "failed", created: NOW_S - 20 },
+    ];
+    const stats = selectSourceRowsWithStats(source, rows, NOW, 48);
+    expect(stats.rowCount).toBe(2);
+    expect(stats.gateDropped).toBe(2);
+    expect(stats.selected).toEqual([]);
   });
 });
 
@@ -351,6 +453,67 @@ describe("parseConfig liveLog block", () => {
     expect(cfg.liveLog?.stats[0].items).toHaveLength(1);
     expect(cfg.liveLog?.sources).toHaveLength(1);
     expect(cfg.liveLog?.sources[0].limit).toBe(10);
+  });
+
+  it("parses row gates, multi-condition variants and enrichment", () => {
+    const cfg = parseConfig(
+      {
+        liveLog: {
+          sources: [
+            {
+              id: "buys", label: "Purchase", api: "https://x/a", itemsPath: "data.items", time: "t",
+              require: [{ field: "status", in: ["completed"] }, { field: "bogus" }],
+              exclude: { field: "test", equals: true },
+              variants: [
+                {
+                  when: [{ field: "status", in: ["active", "grace"] }, { field: "trialEnd", nonNull: true }],
+                  label: "Converted",
+                },
+                { when: { field: "status", equals: "trialing" }, label: "Trial" },
+                { when: [{ field: "x" }], label: "Never" },
+              ],
+              enrich: { api: "https://x/acct/${value}", key: "wallet", fields: { email: "data.email", bad: 7 }, ttlHours: 6, max: 10.9 },
+            },
+          ],
+        },
+      },
+      {}
+    );
+    const source = cfg.liveLog?.sources[0];
+    // A condition that tests nothing is dropped; a variant left with no
+    // conditions is dropped entirely.
+    expect(source?.require).toEqual([{ field: "status", in: ["completed"] }]);
+    expect(source?.exclude).toEqual([{ field: "test", equals: true }]);
+    expect(source?.variants).toHaveLength(2);
+    expect(source?.variants?.[0].when).toEqual([
+      { field: "status", in: ["active", "grace"] },
+      { field: "trialEnd", nonNull: true },
+    ]);
+    // A single condition object is normalized to an array.
+    expect(source?.variants?.[1].when).toEqual([{ field: "status", equals: "trialing" }]);
+    expect(source?.enrich).toEqual({
+      api: "https://x/acct/${value}",
+      key: "wallet",
+      fields: { email: "data.email" },
+      ttlHours: 6,
+      max: 10,
+    });
+  });
+
+  it("drops enrichment blocks missing an api, key or usable fields", () => {
+    const withEnrich = (enrich: unknown) =>
+      parseConfig(
+        {
+          liveLog: {
+            sources: [{ id: "s", label: "L", api: "https://x/a", itemsPath: "d", time: "t", enrich }],
+          },
+        },
+        {}
+      ).liveLog?.sources[0].enrich;
+    expect(withEnrich({ key: "w", fields: { email: "data.email" } })).toBeUndefined();
+    expect(withEnrich({ api: "https://x/${value}", fields: { email: "data.email" } })).toBeUndefined();
+    expect(withEnrich({ api: "https://x/${value}", key: "w", fields: {} })).toBeUndefined();
+    expect(withEnrich("nope")).toBeUndefined();
   });
 
   it("returns null for absent, malformed or empty blocks", () => {
@@ -616,6 +779,164 @@ describe("getLiveLog (integration, stubbed fetch)", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.events).toHaveLength(1);
+  });
+
+  it("enriches rows from a second endpoint, caching per key", async () => {
+    mockConfig(
+      liveLogConfig({
+        stats: [],
+        sources: [
+          makeSource({
+            id: "signups",
+            title: "{user}",
+            detail: "{email}",
+            enrich: {
+              api: "https://api.example.com/accounts/${value}",
+              key: "wallet",
+              fields: { email: "data.email" },
+            },
+          }),
+        ],
+      })
+    );
+    let lookups = 0;
+    stubFetch({
+      "https://api.example.com/nonce": () => ({ body: { data: { nonce: "n" } } }),
+      "https://api.example.com/login": () => ({ body: { data: { token: jwt(NOW_S + 86400) } } }),
+      "https://api.example.com/items": () => ({
+        body: {
+          data: {
+            items: [
+              { user: "ada", wallet: "0xAAA", created: NOW_S - 60 },
+              { user: "bob", wallet: "0xBBB", created: NOW_S - 120 },
+              { user: "ada2", wallet: "0xAAA", created: NOW_S - 180 }, // same key → one lookup
+            ],
+          },
+        },
+      }),
+      "https://api.example.com/accounts/": url => {
+        lookups++;
+        return { body: { data: { email: `${url.split("/").pop()}@example.com` } } };
+      },
+    });
+
+    const result = await getLiveLog(NOW);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.events.map(e => e.detail)).toEqual([
+      "0xAAA@example.com",
+      "0xBBB@example.com",
+      "0xAAA@example.com",
+    ]);
+    expect(lookups).toBe(2); // deduped by key
+    expect(result.sourceErrors).toEqual([]);
+
+    // A later refresh past the source TTL reuses the enrichment cache.
+    const later = new Date(NOW.getTime() + 120_000);
+    const again = await getLiveLog(later);
+    expect(again.ok).toBe(true);
+    expect(lookups).toBe(2);
+  });
+
+  it("keeps rows and reports the failure when enrichment is denied", async () => {
+    mockConfig(
+      liveLogConfig({
+        stats: [],
+        sources: [
+          makeSource({
+            id: "signups",
+            title: "{user}",
+            detail: "{email}",
+            enrich: { api: "https://api.example.com/accounts/${value}", key: "wallet", fields: { email: "data.email" } },
+          }),
+        ],
+      })
+    );
+    stubFetch({
+      "https://api.example.com/nonce": () => ({ body: { data: { nonce: "n" } } }),
+      "https://api.example.com/login": () => ({ body: { data: { token: jwt(NOW_S + 86400) } } }),
+      "https://api.example.com/items": () => ({
+        body: { data: { items: [{ user: "ada", wallet: "0xAAA", created: NOW_S - 60 }] } },
+      }),
+      "https://api.example.com/accounts/": () => ({ status: 403, body: { message: "insufficient privileges" } }),
+    });
+    const result = await getLiveLog(NOW);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The row still renders; only the enriched field is missing.
+    expect(result.events.map(e => e.title)).toEqual(["ada"]);
+    expect(result.events[0].detail).toBeUndefined();
+    expect(result.sourceErrors).toHaveLength(1);
+    expect(result.sourceErrors[0].error).toContain("403");
+    expect(result.stale).toBeUndefined();
+  });
+
+  it("caps enrichment lookups per refresh", async () => {
+    mockConfig(
+      liveLogConfig({
+        stats: [],
+        sources: [
+          makeSource({
+            id: "signups",
+            title: "{user}",
+            detail: "{email}",
+            enrich: { api: "https://api.example.com/accounts/${value}", key: "wallet", fields: { email: "data.email" }, max: 2 },
+          }),
+        ],
+      })
+    );
+    let lookups = 0;
+    stubFetch({
+      "https://api.example.com/nonce": () => ({ body: { data: { nonce: "n" } } }),
+      "https://api.example.com/login": () => ({ body: { data: { token: jwt(NOW_S + 86400) } } }),
+      "https://api.example.com/items": () => ({
+        body: {
+          data: {
+            items: [0, 1, 2, 3].map(i => ({ user: `u${i}`, wallet: `0x${i}`, created: NOW_S - 60 - i })),
+          },
+        },
+      }),
+      "https://api.example.com/accounts/": () => {
+        lookups++;
+        return { body: { data: { email: "x@example.com" } } };
+      },
+    });
+    const result = await getLiveLog(NOW);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(lookups).toBe(2);
+    expect(result.events).toHaveLength(4); // uncapped rows still render, just unenriched
+    expect(result.events.filter(e => e.detail).length).toBe(2);
+  });
+
+  it("warns when row gates reject every row a source returned", async () => {
+    mockConfig(
+      liveLogConfig({
+        stats: [],
+        sources: [
+          makeSource({
+            id: "buys",
+            title: "{user}",
+            require: [{ field: "status", equals: "completed" }],
+          }),
+        ],
+      })
+    );
+    stubFetch({
+      "https://api.example.com/nonce": () => ({ body: { data: { nonce: "n" } } }),
+      "https://api.example.com/login": () => ({ body: { data: { token: jwt(NOW_S + 86400) } } }),
+      "https://api.example.com/items": () => ({
+        body: { data: { items: [{ user: "a", status: "failed", created: NOW_S - 10 }] } },
+      }),
+    });
+    const result = await getLiveLog(NOW);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.events).toEqual([]);
+    // An empty feed caused by a mismatched gate is called out, not passed off
+    // as a quiet morning.
+    expect(result.sourceErrors).toHaveLength(1);
+    expect(result.sourceErrors[0].error).toContain("filtered out by require/exclude");
   });
 
   it("relogs in and retries once on 401", async () => {

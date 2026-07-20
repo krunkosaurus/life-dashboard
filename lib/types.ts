@@ -264,12 +264,35 @@ export type LiveLogBadgeInput = {
   color?: string;
 };
 
-// Reclassify a row when a field matches: first matching variant overrides the
-// row's label/color (e.g. status=trialing → "Trial started").
+// One test against a row field. `equals`/`in` compare stringified values;
+// `nonNull` asserts presence (or absence, when false). Multiple keys on one
+// condition must all hold.
+export type LiveLogCondition = {
+  field: string;
+  equals?: string | number | boolean;
+  in?: (string | number | boolean)[];
+  nonNull?: boolean;
+};
+
+// Reclassify a row when its conditions match: first matching variant overrides
+// the row's label/color. `when` is a single condition or an array that must ALL
+// match (e.g. status in [active,grace] AND trialEnd present → "Converted").
 export type LiveLogVariantInput = {
-  when: { field: string; equals?: string | number | boolean; nonNull?: boolean };
+  when: LiveLogCondition | LiveLogCondition[];
   label?: string;
   color?: string;
+};
+
+// Resolve extra fields per row from a second endpoint (e.g. an id → profile
+// lookup), merged into the row before templating. Results are cached per key
+// for `ttlHours` and capped at `max` lookups per refresh, so the feed stays
+// cheap. Lookup failures leave the fields absent rather than dropping the row.
+export type LiveLogEnrichInput = {
+  api: string;                     // may contain ${value} — the key field's value
+  key: string;                     // row field supplying the lookup value
+  fields: Record<string, string>;  // row field name → response path
+  ttlHours?: number;               // default 24
+  max?: number;                    // default 25
 };
 
 export type LiveLogSourceInput = {
@@ -286,6 +309,13 @@ export type LiveLogSourceInput = {
   value?: string;           // right-aligned text (e.g. "${amountInDollars} · {amountInTokens}⚡")
   badges?: LiveLogBadgeInput[];
   variants?: LiveLogVariantInput[];
+  // Row gates applied before anything renders. `require` keeps only rows where
+  // every condition holds; `exclude` drops rows matching any condition. These
+  // are the local backstop for server-side query filters — if an API ignores a
+  // status param, unwanted rows still never reach the feed.
+  require?: LiveLogCondition[];
+  exclude?: LiveLogCondition[];
+  enrich?: LiveLogEnrichInput;
   windowHours?: number;     // override the feed-wide window for this source
   limit?: number;           // per-source row cap after sorting (default 50)
 };

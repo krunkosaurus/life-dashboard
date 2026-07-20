@@ -9,6 +9,7 @@ import { recordFailure } from "./failures";
 import type {
   LiveLogAuthInput,
   LiveLogBadge,
+  LiveLogCondition,
   LiveLogConfig,
   LiveLogDeriveInput,
   LiveLogEip712Input,
@@ -121,10 +122,37 @@ export function renderTemplate(template: string, row: Record<string, unknown>): 
     .join(" · ");
 }
 
-function variantMatches(row: Record<string, unknown>, when: { field: string; equals?: string | number | boolean; nonNull?: boolean }): boolean {
-  const v = resolvePath(row, when.field);
-  if (when.equals !== undefined && String(v) !== String(when.equals)) return false;
-  if (when.nonNull !== undefined && (v != null) !== when.nonNull) return false;
+// A row field is "present" when it is neither null/undefined nor an empty
+// string — APIs express absence both ways.
+function fieldPresent(v: unknown): boolean {
+  return v != null && v !== "";
+}
+
+// Enum-ish values differ in case between APIs and their own docs
+// ("production" vs "Production"), and a case-sensitive gate that silently
+// drops every row is worse than a lenient one — compare case-insensitively.
+function sameValue(a: unknown, b: unknown): boolean {
+  return String(a).toLowerCase() === String(b).toLowerCase();
+}
+
+export function conditionMatches(row: Record<string, unknown>, cond: LiveLogCondition): boolean {
+  const v = resolvePath(row, cond.field);
+  if (cond.equals !== undefined && !sameValue(v, cond.equals)) return false;
+  if (cond.in !== undefined && !cond.in.some(candidate => sameValue(v, candidate))) return false;
+  if (cond.nonNull !== undefined && fieldPresent(v) !== cond.nonNull) return false;
+  return true;
+}
+
+function allMatch(row: Record<string, unknown>, conds: LiveLogCondition[]): boolean {
+  return conds.every(c => conditionMatches(row, c));
+}
+
+// Row gate: every `require` must hold and no `exclude` may. This is the local
+// backstop for server-side filters — a source that silently widens its result
+// set (e.g. an ignored status param) still cannot leak rows into the feed.
+export function rowAllowed(source: LiveLogSourceInput, row: Record<string, unknown>): boolean {
+  if (source.require && !allMatch(row, source.require)) return false;
+  if (source.exclude && source.exclude.some(c => conditionMatches(row, c))) return false;
   return true;
 }
 
@@ -135,7 +163,8 @@ export function applyVariants(
   defaultColor: string
 ): { label: string; color: string } {
   for (const variant of source.variants ?? []) {
-    if (variantMatches(row, variant.when)) {
+    const conds = Array.isArray(variant.when) ? variant.when : [variant.when];
+    if (allMatch(row, conds)) {
       return { label: variant.label ?? source.label, color: variant.color ?? source.color ?? defaultColor };
     }
   }
@@ -162,29 +191,61 @@ export function resolveBadges(source: LiveLogSourceInput, row: Record<string, un
 
 const DEFAULT_EVENT_COLOR = "#7aa2f7";
 
-// Turn one source's raw rows into normalized feed events: window, sort desc,
-// cap. Rows without a parseable in-window timestamp are dropped.
-export function normalizeSourceRows(
+// A raw row that passed the gates, paired with its parsed timestamp.
+export type SelectedRow = { row: Record<string, unknown>; time: number; index: number };
+
+// Pick the rows a source will contribute: drop non-objects, apply the
+// require/exclude gates, require a parseable in-window timestamp, sort newest
+// first, and cap. Kept separate from rendering so enrichment can run on just
+// the surviving rows.
+export function selectSourceRows(
   source: LiveLogSourceInput,
   rows: unknown[],
   now: Date,
   feedWindowHours: number
-): LiveLogEvent[] {
+): SelectedRow[] {
+  return selectSourceRowsWithStats(source, rows, now, feedWindowHours).selected;
+}
+
+// Same selection, plus how many rows the gates removed. A gate that silently
+// eats an entire response looks identical to "nothing happened", so callers
+// surface that case rather than showing a confidently empty feed.
+export function selectSourceRowsWithStats(
+  source: LiveLogSourceInput,
+  rows: unknown[],
+  now: Date,
+  feedWindowHours: number
+): { selected: SelectedRow[]; gateDropped: number; rowCount: number } {
   const nowS = Math.floor(now.getTime() / 1000);
-  const windowHours = source.windowHours ?? feedWindowHours;
-  const cutoff = nowS - windowHours * 3600;
-  const events: LiveLogEvent[] = [];
-  rows.forEach((raw, i) => {
+  const cutoff = nowS - (source.windowHours ?? feedWindowHours) * 3600;
+  const selected: SelectedRow[] = [];
+  let gateDropped = 0;
+  let rowCount = 0;
+  rows.forEach((raw, index) => {
     if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return;
+    rowCount++;
     const row = raw as Record<string, unknown>;
+    if (!rowAllowed(source, row)) {
+      gateDropped++;
+      return;
+    }
     const time = parseTime(resolvePath(row, source.time));
     if (time == null || time < cutoff || time > nowS + FUTURE_SLACK_S) return;
+    selected.push({ row, time, index });
+  });
+  selected.sort((a, b) => b.time - a.time || a.index - b.index);
+  return { selected: selected.slice(0, source.limit ?? DEFAULT_SOURCE_LIMIT), gateDropped, rowCount };
+}
+
+// Render selected rows into feed events (labels, templates, badges).
+export function renderSourceEvents(source: LiveLogSourceInput, selected: SelectedRow[]): LiveLogEvent[] {
+  return selected.map(({ row, time, index }) => {
     const { label, color } = applyVariants(source, row, DEFAULT_EVENT_COLOR);
     const title = source.title ? renderTemplate(source.title, row) : "";
     const detail = source.detail ? renderTemplate(source.detail, row) : "";
     const value = source.value ? renderTemplate(source.value, row) : "";
     const event: LiveLogEvent = {
-      id: `${source.id}:${time}:${title || label}:${i}`,
+      id: `${source.id}:${time}:${title || label}:${index}`,
       sourceId: source.id,
       label,
       color,
@@ -194,10 +255,18 @@ export function normalizeSourceRows(
     };
     if (detail) event.detail = detail;
     if (value) event.value = value;
-    events.push(event);
+    return event;
   });
-  events.sort((a, b) => b.time - a.time || (a.id < b.id ? -1 : 1));
-  return events.slice(0, source.limit ?? DEFAULT_SOURCE_LIMIT);
+}
+
+// Convenience: select + render in one step (no enrichment).
+export function normalizeSourceRows(
+  source: LiveLogSourceInput,
+  rows: unknown[],
+  now: Date,
+  feedWindowHours: number
+): LiveLogEvent[] {
+  return renderSourceEvents(source, selectSourceRows(source, rows, now, feedWindowHours));
 }
 
 export function mergeEvents(lists: LiveLogEvent[][], maxItems: number): LiveLogEvent[] {
@@ -564,11 +633,81 @@ function statsKey(group: LiveLogStatGroupInput): string {
   return `${group.api}|${JSON.stringify(group.params ?? {})}`;
 }
 
+// Per-key cache of enrichment lookups. Values change rarely (profile data), so
+// the TTL is hours, not the 60s source TTL.
+const enrichCache = new Map<string, { at: number; values: Record<string, unknown> }>();
+
+// Resolve each row's extra fields from the enrichment endpoint, merging them
+// into the row before templating. Lookups run in parallel, are cached per key,
+// and are capped per refresh. A failed lookup leaves the fields absent — the
+// row still renders — and is reported so a systematically failing lookup (e.g.
+// insufficient privileges) is visible rather than silently blank.
+async function enrichRows(
+  source: LiveLogSourceInput,
+  selected: SelectedRow[],
+  cfg: LiveLogConfig,
+  now: Date
+): Promise<{ enriched: SelectedRow[]; error?: string }> {
+  const enrich = source.enrich;
+  if (!enrich || selected.length === 0) return { enriched: selected };
+  const nowS = Math.floor(now.getTime() / 1000);
+  const ttlMs = (enrich.ttlHours ?? 24) * 3600_000;
+  const budget = enrich.max ?? 25;
+
+  let attempted = 0;
+  let failed = 0;
+  let lastError = "";
+  const lookups = new Map<string, Promise<Record<string, unknown> | null>>();
+
+  const resolveKey = (key: string): Promise<Record<string, unknown> | null> => {
+    const cacheKey = `${enrich.api}|${key}`;
+    const cached = enrichCache.get(cacheKey);
+    if (cached && now.getTime() - cached.at < ttlMs) return Promise.resolve(cached.values);
+    if (attempted >= budget) return Promise.resolve(null);
+    attempted++;
+    const url = substituteTokens(enrich.api.replaceAll("${value}", encodeURIComponent(key)), now);
+    const pending = authedGet(url, cfg.auth, nowS)
+      .then(json => {
+        const values: Record<string, unknown> = {};
+        for (const [name, path] of Object.entries(enrich.fields)) {
+          const v = resolvePath(json, path);
+          if (v !== undefined) values[name] = v;
+        }
+        enrichCache.set(cacheKey, { at: now.getTime(), values });
+        return values;
+      })
+      .catch((e: Error) => {
+        failed++;
+        lastError = e.message;
+        return null;
+      });
+    return pending;
+  };
+
+  const enriched = await Promise.all(
+    selected.map(async entry => {
+      const key = resolvePath(entry.row, enrich.key);
+      if (!fieldPresent(key)) return entry;
+      const keyStr = String(key);
+      if (!lookups.has(keyStr)) lookups.set(keyStr, resolveKey(keyStr));
+      const values = await lookups.get(keyStr);
+      return values ? { ...entry, row: { ...entry.row, ...values } } : entry;
+    })
+  );
+
+  if (failed > 0) {
+    const message = `enrich ${enrich.key} lookup failed (${failed}/${attempted}): ${lastError}`;
+    console.error(`[livelog] ${source.id}: ${message}`);
+    return { enriched, error: message };
+  }
+  return { enriched };
+}
+
 async function fetchSourceEvents(
   source: LiveLogSourceInput,
   cfg: LiveLogConfig,
   now: Date
-): Promise<LiveLogEvent[]> {
+): Promise<{ events: LiveLogEvent[]; enrichError?: string }> {
   const nowS = Math.floor(now.getTime() / 1000);
   // Date fan-out: one request per configured date (tokens expanded first).
   const dates = source.dates?.map(d => substituteTokens(d, now)) ?? [undefined];
@@ -580,7 +719,20 @@ async function fetchSourceEvents(
       return rows;
     })
   );
-  return normalizeSourceRows(source, pages.flat(), now, cfg.windowHours);
+  const { selected, gateDropped, rowCount } = selectSourceRowsWithStats(source, pages.flat(), now, cfg.windowHours);
+  const { enriched, error } = await enrichRows(source, selected, cfg, now);
+  // Every row the API returned was rejected by require/exclude: almost always
+  // a mismatched gate (a renamed field, a differently-shaped value) rather
+  // than a genuinely quiet period. Say so instead of showing an empty feed.
+  const gateWarning =
+    rowCount > 0 && gateDropped === rowCount
+      ? `all ${rowCount} rows filtered out by require/exclude — check the gate fields`
+      : undefined;
+  if (gateWarning) console.error(`[livelog] ${source.id}: ${gateWarning}`);
+  return {
+    events: renderSourceEvents(source, enriched),
+    ...(error ? { enrichError: error } : gateWarning ? { enrichError: gateWarning } : {}),
+  };
 }
 
 // Re-window cached/last-good events against the current clock so old entries
@@ -590,25 +742,29 @@ function windowEvents(events: LiveLogEvent[], source: LiveLogSourceInput, cfg: L
   return events.filter(e => e.time >= cutoff);
 }
 
-type SourceOutcome = { events: LiveLogEvent[]; error?: string; stale: boolean };
-type StatsOutcome = { stats: LiveLogStat[]; error?: string; stale: boolean };
+// `ok` means the data fetch itself succeeded, so the events are current and
+// worth snapshotting — an enrichment failure sets `error` but leaves `ok` true.
+type SourceOutcome = { events: LiveLogEvent[]; error?: string; stale: boolean; ok: boolean };
+type StatsOutcome = { stats: LiveLogStat[]; error?: string; stale: boolean; ok: boolean };
 
 async function resolveSource(source: LiveLogSourceInput, cfg: LiveLogConfig, now: Date): Promise<SourceOutcome> {
   const nowS = Math.floor(now.getTime() / 1000);
   const key = sourceKey(source);
   const cached = sourceCache.get(key);
   if (cached && now.getTime() - cached.at < SUCCESS_TTL_MS) {
-    return { events: windowEvents(cached.value, source, cfg, nowS), stale: false };
+    return { events: windowEvents(cached.value, source, cfg, nowS), stale: false, ok: true };
   }
   try {
-    const events = await fetchSourceEvents(source, cfg, now);
+    const { events, enrichError } = await fetchSourceEvents(source, cfg, now);
     sourceCache.set(key, { at: now.getTime(), value: events });
-    return { events, stale: false };
+    // A failed enrichment still yields usable rows; surface it without
+    // discarding them or marking the source stale.
+    return { events, stale: false, ok: true, ...(enrichError ? { error: enrichError } : {}) };
   } catch (e) {
     const message = noteFailure(source.id, (e as Error).message, nowS);
     const fallback = cached?.value ?? lastGood?.events[key];
-    if (fallback) return { events: windowEvents(fallback, source, cfg, nowS), error: message, stale: true };
-    return { events: [], error: message, stale: false };
+    if (fallback) return { events: windowEvents(fallback, source, cfg, nowS), error: message, stale: true, ok: false };
+    return { events: [], error: message, stale: false, ok: false };
   }
 }
 
@@ -617,20 +773,20 @@ async function resolveStats(group: LiveLogStatGroupInput, index: number, cfg: Li
   const key = statsKey(group);
   const cached = statsCache.get(key);
   if (cached && now.getTime() - cached.at < SUCCESS_TTL_MS) {
-    return { stats: cached.value, stale: false };
+    return { stats: cached.value, stale: false, ok: true };
   }
   const context = `stats[${index}] ${group.items[0]?.label ?? ""}`.trim();
   try {
     const json = await authedGet(buildUrl(group.api, group.params, now), cfg.auth, nowS);
     const stats = extractStats(group, json);
     statsCache.set(key, { at: now.getTime(), value: stats });
-    return { stats, stale: false };
+    return { stats, stale: false, ok: true };
   } catch (e) {
     const message = noteFailure(context, (e as Error).message, nowS);
     const fallback = cached?.value ?? lastGood?.stats[key];
-    if (fallback) return { stats: fallback, error: message, stale: true };
+    if (fallback) return { stats: fallback, error: message, stale: true, ok: false };
     // Keep tile layout stable: failed groups render as em-dashes.
-    return { stats: group.items.map(item => ({ label: item.label, value: "—" })), error: message, stale: false };
+    return { stats: group.items.map(item => ({ label: item.label, value: "—" })), error: message, stale: false, ok: false };
   }
 }
 
@@ -639,13 +795,13 @@ function persistLastGood(cfg: LiveLogConfig, sources: SourceOutcome[], stats: St
   const next: LastGood = { at: now.getTime(), events: { ...lastGood?.events }, stats: { ...lastGood?.stats } };
   let changed = false;
   cfg.sources.forEach((source, i) => {
-    if (!sources[i].error && !sources[i].stale) {
+    if (sources[i].ok && !sources[i].stale) {
       next.events[sourceKey(source)] = sources[i].events;
       changed = true;
     }
   });
   cfg.stats.forEach((group, i) => {
-    if (!stats[i].error && !stats[i].stale) {
+    if (stats[i].ok && !stats[i].stale) {
       next.stats[statsKey(group)] = stats[i].stats;
       changed = true;
     }
@@ -663,6 +819,7 @@ export function resetLiveLogStateForTests(): void {
   loginInFlight = null;
   sourceCache.clear();
   statsCache.clear();
+  enrichCache.clear();
   failures = [];
   lastGood = null;
   lastGoodLoaded = false;
@@ -731,8 +888,7 @@ export async function getLiveLog(now = new Date()): Promise<LiveLogResult> {
     if (err) sourceErrors.push({ id: `stats-${i}`, label: group.items[0]?.label ?? "stats", error: err });
   });
 
-  const anyFresh =
-    sourceOutcomes.some(o => !o.error && !o.stale) || statsOutcomes.some(o => !o.error && !o.stale);
+  const anyFresh = sourceOutcomes.some(o => o.ok && !o.stale) || statsOutcomes.some(o => o.ok && !o.stale);
   const anyStale = sourceOutcomes.some(o => o.stale) || statsOutcomes.some(o => o.stale);
   if (!anyFresh && !anyStale && sourceErrors.length > 0 && events.length === 0) {
     return { ok: false, error: sourceErrors[0].error, failures };

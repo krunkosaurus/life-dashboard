@@ -99,6 +99,11 @@
           { "label": "Monthly", "path": "data.byPeriod[period=monthly].count" },
           { "label": "Annual", "path": "data.byPeriod[period=annual].count" }
         ]
+      },
+      {
+        "api": "https://api.example.com/admin/revenue-summary",
+        "params": { "date": "${today}", "status": "failed" },
+        "items": [{ "label": "Failed pay today", "path": "data.total.count" }]
       }
     ],
     "sources": [
@@ -118,9 +123,29 @@
         "params": { "from": "${ymdDaysAgo:2}", "status": "completed", "limit": 50 },
         "itemsPath": "data.transactions",
         "time": "createdAt",
+        "require": [{ "field": "status", "in": ["completed"] }],
         "title": "{username}",
+        "detail": "{email}",
         "value": "${amountUsd} · {credits} credits",
-        "badges": [{ "field": "provider" }]
+        "badges": [{ "field": "provider" }],
+        "enrich": {
+          "api": "https://api.example.com/admin/accounts/${value}",
+          "key": "accountId",
+          "fields": { "email": "data.email" },
+          "ttlHours": 24,
+          "max": 25
+        }
+      },
+      {
+        "id": "refunds", "label": "Refund", "color": "#ef4444",
+        "api": "https://api.example.com/admin/purchases",
+        "params": { "from": "${ymdDaysAgo:2}", "status": "refunded", "limit": 25 },
+        "itemsPath": "data.transactions",
+        "time": "createdAt",
+        "require": [{ "field": "status", "in": ["refunded"] }],
+        "title": "{username}",
+        "detail": "refunded",
+        "value": "-${amountUsd}"
       },
       {
         "id": "subscriptions", "label": "Subscribed", "color": "#a78bfa",
@@ -135,8 +160,16 @@
           { "field": "plan" }
         ],
         "variants": [
-          { "when": { "field": "status", "equals": "trialing" }, "label": "Trial started", "color": "#f59e0b" },
-          { "when": { "field": "trialEndsAt", "nonNull": true }, "label": "Trial converted", "color": "#34d399" }
+          { "when": [{ "field": "status", "equals": "trialing" }], "label": "Trial started", "color": "#f59e0b" },
+          {
+            "when": [
+              { "field": "status", "in": ["active", "grace"] },
+              { "field": "trialEndsAt", "nonNull": true }
+            ],
+            "label": "Trial converted", "color": "#34d399"
+          },
+          { "when": [{ "field": "status", "in": ["active", "grace"] }], "label": "Subscribed", "color": "#34d399" },
+          { "when": [{ "field": "status", "in": ["cancelled", "expired"] }], "label": "Cancelled", "color": "#f87171" }
         ]
       }
     ]

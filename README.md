@@ -380,8 +380,8 @@ is `"number"` (default), `"usd"`, or `"percent"` (values ≤ 1 are treated as
 fractions).
 
 **Sources** — each is one feed: `{ id, label, color?, api, params?, dates?,
-itemsPath, time, title?, detail?, value?, badges?, variants?, windowHours?,
-limit? }`.
+itemsPath, time, title?, detail?, value?, badges?, variants?, require?,
+exclude?, enrich?, windowHours?, limit? }`.
 
 - `itemsPath` — dotted path to the response's row array (envelope-agnostic).
 - `time` — row field holding the timestamp; unix seconds, milliseconds, and ISO
@@ -392,11 +392,28 @@ limit? }`.
 - `badges` — chips per row: `{ field, map?, color? }`. With `map`, only mapped
   values render (e.g. `{ "monthly": "Monthly", "annual": "Annual" }`); without
   it the raw value is shown.
-- `variants` — reclassify rows: first match of
-  `{ when: { field, equals? | nonNull? }, label?, color? }` overrides the row's
-  label/color (e.g. `status = trialing` → "Trial started").
+- `require` / `exclude` — **row gates, applied before anything renders.**
+  `require` keeps only rows where every condition holds; `exclude` drops rows
+  matching any. Treat these as the local backstop for server-side query
+  filters: if an API ignores or defaults a `status` param, unwanted rows still
+  never reach the feed. Gates run before `limit`, so junk can't crowd out real
+  rows.
+- `variants` — reclassify rows: the first variant whose conditions ALL match
+  overrides the row's label/color. Use an array to require several conditions
+  at once (e.g. `status` in `[active, grace]` **and** `trialEnd` present →
+  "Converted"), which keeps a churned row from matching a "converted" rule.
+- `enrich` — resolve extra fields per row from a second endpoint:
+  `{ api, key, fields, ttlHours?, max? }`. `api` may contain `${value}` (the
+  `key` field's value); `fields` maps a row field name to a response path.
+  Results are cached per key (default 24h), deduped within a refresh, and
+  capped at `max` lookups (default 25). A failed lookup leaves the field absent
+  and is reported — the row still renders.
 - `dates` — fan out one request per entry, substituting `${date}` into `params`
   (for day-bucketed endpoints: `["${today}", "${yesterday}"]`).
+
+**Conditions** (used by `require`, `exclude`, and `variants.when`) are
+`{ field, equals? , in?, nonNull? }`. Values compare as strings, `in` accepts a
+list, and `nonNull` treats `null`/missing/empty-string as absent.
 
 Param values and `dates` accept UTC time tokens: `${today}`, `${yesterday}`,
 `${ymdDaysAgo:N}`, `${isoDaysAgo:N}`, `${epochDaysAgo:N}`, `${nowIso}`.
@@ -423,12 +440,22 @@ re-obtained once on a 401/403. `origin` is sent as `Origin`/`Referer` for APIs
 that allowlist calling origins; `extraBody` is merged into the login POST. Omit
 `auth` entirely for public endpoints.
 
+Rows render as `HH:MM · source · title · badges · detail · value`, grouped
+under Today / Yesterday / date separators in your local timezone (hover a
+timestamp for its relative age).
+
 Failure handling matches the other panels: each source/stat group fails
 independently (amber inline notice), successful fetches are cached server-side
 for 60s, and the last healthy payload is kept in
 `.cache/livelog-last-good.json` so an API outage shows stale data (dimmed, with
 a "stale" footer) instead of a blank panel. Omit `liveLog` entirely to hide the
 panel.
+
+A note on trusting the feed: anything money-related is worth pinning down with
+`require` so a permissive API default can't turn a failed or abandoned payment
+into what looks like a sale. Keeping negative events (refunds, cancellations)
+in their own source with a distinct label and color — rather than filtering
+them away — means you see them without ever mistaking them for revenue.
 
 ### Refresh
 
