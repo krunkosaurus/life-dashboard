@@ -144,12 +144,12 @@ export default function Page() {
         onDayOffsetChange={changeOuraDayOffset}
       />
 
-      <LiveLogPanel data={liveLog} />
-
       <div className="grid grid-2">
         <UsagePanel title="Claude Code" data={claude} />
         <UsagePanel title="Codex" data={codex} />
       </div>
+
+      <LiveLogPanel data={liveLog} />
 
       <ChecklistPanel data={checklists} />
 
