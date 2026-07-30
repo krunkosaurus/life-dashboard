@@ -469,13 +469,19 @@ minimum 5).
   `~/.codex/logs_2.sqlite`, but Codex >= 0.135 stopped writing it.) Requires the
   `codex` binary on PATH; Codex can expose one or two windows, and the dashboard
   renders every usable one. If the call fails, the panel shows the error.
-- **Claude limits** are fetched from Anthropic's OAuth usage endpoint. On macOS the
-  token is read from the login Keychain (service `Claude Code-credentials`, which
-  the Claude Code CLI keeps current), falling back to `~/.claude/.credentials.json`
-  on Linux or if the Keychain item is absent; whichever is freshest wins. The token
-  never reaches the browser, and is auto-refreshed when expired (backing off on
-  `Retry-After` when rate limited). Recent fetch failures are logged per source in
-  a collapsible list under each gauge.
+- **Claude limits** are fetched from Anthropic's OAuth usage endpoint. Credential
+  candidates come from the dashboard's private cache, the macOS login Keychain
+  (service `Claude Code-credentials`, which Claude Code keeps current), and
+  `~/.claude/.credentials.json`; whichever is freshest wins. The token never reaches
+  the browser, and is auto-refreshed when expired using Claude Code's
+  JSON OAuth refresh format (backing off on `Retry-After` when rate limited). A newer
+  valid credential written by Claude Code immediately invalidates a cached auth
+  failure. Rejected access tokens trigger one immediate credential reload/refresh and
+  usage retry; repeated refresh rate limits progressively back off from 15 minutes to
+  four hours. Concurrent dashboard requests share one refresh, and a rotated token is
+  saved with `0600` permissions in the gitignored `.cache/claude-oauth.json` so recovery
+  survives dashboard restarts. Recent fetch failures are logged per source in a
+  collapsible list under each gauge.
 - **Live log** events come from whatever JSON HTTP endpoints `liveLog` names in
   `config.local.json`, fetched server-side in parallel with a 10s timeout, cached
   per source for 60s, and merged into one feed. Auth (when configured) is a

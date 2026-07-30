@@ -13,11 +13,14 @@ type AppServerWindow = {
   resetsAt?: number | null;
 };
 
+type RateLimitSnapshot = {
+  primary?: AppServerWindow | null;
+  secondary?: AppServerWindow | null;
+};
+
 type RateLimitsResult = {
-  rateLimits?: {
-    primary?: AppServerWindow | null;
-    secondary?: AppServerWindow | null;
-  } | null;
+  rateLimits?: RateLimitSnapshot | null;
+  rateLimitsByLimitId?: Record<string, RateLimitSnapshot> | null;
 };
 
 function windowLabel(durationMins: number | null | undefined, fallback: string): string {
@@ -59,17 +62,27 @@ function mapWindow(w: AppServerWindow | null | undefined, fallbackLabel: string)
 // Pure mapping from an `account/rateLimits/read` result onto UsageResult.
 // Exported for testing. `snapshotAt` is unix seconds.
 export function parseRateLimitsResult(result: unknown, snapshotAt: number): UsageResult {
-  const rl = (result as RateLimitsResult)?.rateLimits;
-  if (!rl) {
+  const response = result as RateLimitsResult | null;
+  const candidates = [
+    response?.rateLimits,
+    response?.rateLimitsByLimitId?.codex,
+    ...Object.values(response?.rateLimitsByLimitId ?? {}),
+  ].filter((candidate, index, all): candidate is RateLimitSnapshot =>
+    candidate != null && all.indexOf(candidate) === index
+  );
+  if (candidates.length === 0) {
     return { ok: false, error: "missing rate-limit snapshot" };
   }
-  const primary = mapWindow(rl.primary, "5h");
-  const secondary = mapWindow(rl.secondary, "weekly");
-  const windows = [primary, secondary].filter((w): w is UsageWindow => w !== null);
-  if (windows.length === 0) {
-    return { ok: false, error: "rate-limit snapshot contains no usable windows" };
+
+  for (const rl of candidates) {
+    const primary = mapWindow(rl.primary, "5h");
+    const secondary = mapWindow(rl.secondary, "weekly");
+    const windows = [primary, secondary].filter((w): w is UsageWindow => w !== null);
+    if (windows.length > 0) {
+      return { ok: true, snapshotAt, windows };
+    }
   }
-  return { ok: true, snapshotAt, windows };
+  return { ok: false, error: "rate-limit snapshot contains no usable windows" };
 }
 
 // Each read spawns a `codex app-server` process, so cache briefly to coalesce
@@ -78,7 +91,10 @@ export function parseRateLimitsResult(result: unknown, snapshotAt: number): Usag
 // broken `codex` binary isn't respawned on every poll.
 const SUCCESS_TTL_MS = 15_000;
 const ERROR_TTL_MS = 60_000;
+const MAX_STALE_MS = 24 * 60 * 60_000;
 let cache: { at: number; ttl: number; result: UsageResult } | null = null;
+let inFlight: Promise<UsageResult> | null = null;
+let lastGood: Extract<UsageResult, { ok: true }> | null = null;
 
 // Recent fetch failures, surfaced in the payload so the UI can show a small
 // error history. In-memory only; resets on restart.
@@ -90,17 +106,44 @@ export async function fetchCodexRateLimit(): Promise<UsageResult> {
   const now = Date.now();
   if (cache && now - cache.at < cache.ttl) return cache.result;
 
-  const result = await readLatestCodexRateLimit();
-  if (!result.ok) {
-    console.error(`[codex-usage] fetch failed: ${result.error}`);
-    failureLog = recordFailure(failureLog, result.error, Math.floor(now / 1000));
+  // Cache entries are written only after the app-server replies. Without a
+  // separate in-flight gate, simultaneous tabs all miss the cache and each
+  // spawn their own Codex process.
+  if (inFlight) return inFlight;
+
+  const request = readLatestCodexRateLimit().then((fresh) => {
+    if (fresh.ok) {
+      lastGood = fresh;
+    } else {
+      console.error(`[codex-usage] fetch failed: ${fresh.error}`);
+      failureLog = recordFailure(failureLog, fresh.error, Math.floor(Date.now() / 1000));
+    }
+
+    const result: UsageResult = fresh.ok
+      ? fresh
+      : lastGood
+        && lastGood.snapshotAt != null
+        && Date.now() - lastGood.snapshotAt * 1000 < MAX_STALE_MS
+        ? { ...lastGood, staleReason: fresh.error }
+        : fresh;
+    const withFailures = failureLog.length > 0 ? { ...result, failures: failureLog } : result;
+    cache = {
+      at: Date.now(),
+      ttl: fresh.ok ? SUCCESS_TTL_MS : ERROR_TTL_MS,
+      result: withFailures,
+    };
+    return withFailures;
+  });
+  inFlight = request;
+  try {
+    return await request;
+  } finally {
+    if (inFlight === request) inFlight = null;
   }
-  const withFailures = failureLog.length > 0 ? { ...result, failures: failureLog } : result;
-  cache = { at: now, ttl: result.ok ? SUCCESS_TTL_MS : ERROR_TTL_MS, result: withFailures };
-  return withFailures;
 }
 
 const RPC_TIMEOUT_MS = 15000;
+const EMPTY_SNAPSHOT_RETRY_DELAYS_MS = [250, 750];
 
 // Spawn `codex app-server`, run the JSON-RPC handshake, and resolve the live
 // rate-limit snapshot. Never rejects — failures map onto { ok: false }.
@@ -117,11 +160,14 @@ export function readLatestCodexRateLimit(): Promise<UsageResult> {
     let settled = false;
     let buf = "";
     let stderr = "";
+    let readAttempt = 0;
+    const retryTimers = new Set<ReturnType<typeof setTimeout>>();
 
     const finish = (r: UsageResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      for (const retryTimer of retryTimers) clearTimeout(retryTimer);
       child.kill("SIGKILL");
       resolve(r);
     };
@@ -140,7 +186,20 @@ export function readLatestCodexRateLimit(): Promise<UsageResult> {
       }
     });
 
-    child.stderr?.on("data", (d) => { stderr += d.toString(); });
+    const send = (o: unknown) => child.stdin?.write(JSON.stringify(o) + "\n");
+    const requestRateLimits = () => {
+      readAttempt += 1;
+      send({
+        jsonrpc: "2.0",
+        id: readAttempt + 1,
+        method: "account/rateLimits/read",
+        params: {},
+      });
+    };
+
+    child.stderr?.on("data", (d) => {
+      stderr = (stderr + d.toString()).slice(-2000);
+    });
     child.stdout?.on("data", (d) => {
       buf += d.toString();
       let nl: number;
@@ -148,18 +207,49 @@ export function readLatestCodexRateLimit(): Promise<UsageResult> {
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
         if (!line) continue;
-        let msg: { id?: number; result?: unknown };
+        let msg: {
+          id?: number;
+          result?: unknown;
+          error?: { code?: number; message?: string };
+        };
         try { msg = JSON.parse(line); } catch { continue; }
-        if (msg.id === 2) {
+        if (msg.id === 1) {
+          if (msg.error) {
+            finish({
+              ok: false,
+              error: `codex app-server initialization failed: ${msg.error.message ?? `RPC ${msg.error.code ?? "error"}`}`,
+            });
+            continue;
+          }
+          // Initialization is ordered in JSON-RPC: wait for the response
+          // before sending initialized and the first account read.
+          send({ jsonrpc: "2.0", method: "initialized", params: {} });
+          requestRateLimits();
+          continue;
+        }
+        if (typeof msg.id === "number" && msg.id >= 2 && msg.id <= EMPTY_SNAPSHOT_RETRY_DELAYS_MS.length + 2) {
+          if (msg.error) {
+            finish({
+              ok: false,
+              error: `codex rate-limit read failed: ${msg.error.message ?? `RPC ${msg.error.code ?? "error"}`}`,
+            });
+            continue;
+          }
           const snapshotAt = Math.floor(Date.now() / 1000);
-          finish(parseRateLimitsResult(msg.result, snapshotAt));
+          const parsed = parseRateLimitsResult(msg.result, snapshotAt);
+          if (!parsed.ok && readAttempt <= EMPTY_SNAPSHOT_RETRY_DELAYS_MS.length) {
+            const retryTimer = setTimeout(() => {
+              retryTimers.delete(retryTimer);
+              if (!settled) requestRateLimits();
+            }, EMPTY_SNAPSHOT_RETRY_DELAYS_MS[readAttempt - 1]);
+            retryTimers.add(retryTimer);
+          } else {
+            finish(parsed);
+          }
         }
       }
     });
 
-    const send = (o: unknown) => child.stdin?.write(JSON.stringify(o) + "\n");
     send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { clientInfo: { name: "life-dashboard", version: "0.0.0" }, capabilities: {} } });
-    send({ jsonrpc: "2.0", method: "initialized", params: {} });
-    send({ jsonrpc: "2.0", id: 2, method: "account/rateLimits/read", params: {} });
   });
 }

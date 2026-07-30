@@ -18,6 +18,8 @@ const CLI_CANDIDATES = [
 const SUCCESS_TTL_MS = 15_000;
 const ERROR_TTL_MS = 60_000;
 let cache: { at: number; ttl: number; result: ServersResult } | null = null;
+let inFlight: Promise<ServersResult> | null = null;
+let lastGood: Extract<ServersResult, { ok: true }> | null = null;
 
 function findCli(): string {
   for (const p of CLI_CANDIDATES) {
@@ -98,9 +100,46 @@ export function parseTailscaleStatus(
 export async function fetchTailscaleStatus(): Promise<ServersResult> {
   const now = Date.now();
   if (cache && now - cache.at < cache.ttl) return cache.result;
-  const result = await doFetch();
-  cache = { at: now, ttl: result.ok ? SUCCESS_TTL_MS : ERROR_TTL_MS, result };
-  return result;
+  if (inFlight) return inFlight;
+
+  const request = doFetch().then((fresh) => {
+    if (fresh.ok) lastGood = fresh;
+    const result: ServersResult = fresh.ok
+      ? fresh
+      : lastGood
+        ? { ...lastGood, staleReason: fresh.error }
+        : fresh;
+    cache = {
+      at: Date.now(),
+      ttl: fresh.ok ? SUCCESS_TTL_MS : ERROR_TTL_MS,
+      result,
+    };
+    return result;
+  });
+  inFlight = request;
+  try {
+    return await request;
+  } finally {
+    if (inFlight === request) inFlight = null;
+  }
+}
+
+export function describeTailscaleExecError(error: unknown): string {
+  const e = error as Error & {
+    stdout?: string | Buffer;
+    stderr?: string | Buffer;
+    code?: string | number;
+    signal?: string;
+  };
+  const message = e?.message?.trim().replace(/\s+/g, " ") || "unknown command error";
+  const output = String(e?.stderr || e?.stdout || "").trim().replace(/\s+/g, " ").slice(-300);
+  const status = e?.code != null
+    ? `exit ${e.code}`
+    : e?.signal
+      ? `signal ${e.signal}`
+      : "";
+  const details = [status, output].filter(Boolean).join(": ");
+  return details && !message.includes(output) ? `${message} (${details})` : message;
 }
 
 async function doFetch(): Promise<ServersResult> {
@@ -116,7 +155,7 @@ async function doFetch(): Promise<ServersResult> {
       maxBuffer: 10 * 1024 * 1024,
     }));
   } catch (e) {
-    const msg = (e as Error).message;
+    const msg = describeTailscaleExecError(e);
     console.error(`[tailscale] status failed: ${msg}`);
     return { ok: false, error: `tailscale status failed: ${msg}` };
   }
