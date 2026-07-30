@@ -27,6 +27,45 @@ describe("parseRateLimitsResult", () => {
     expect(parseRateLimitsResult(null, 0).ok).toBe(false);
   });
 
+  it("uses the named Codex bucket from a multi-bucket response", () => {
+    const result = parseRateLimitsResult(
+      {
+        rateLimits: null,
+        rateLimitsByLimitId: {
+          codex_bengalfox: {
+            primary: { usedPercent: null, windowDurationMins: null, resetsAt: null },
+          },
+          codex: {
+            primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: 1780153759 },
+          },
+        },
+      },
+      1780135575
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.windows).toEqual([
+      { label: "5h", usedPercent: 12, resetAt: 1780153759, windowSecs: 18000 },
+    ]);
+  });
+
+  it("falls through from an unusable legacy snapshot to a usable bucket", () => {
+    const result = parseRateLimitsResult(
+      {
+        rateLimits: { primary: null, secondary: null },
+        rateLimitsByLimitId: {
+          custom: {
+            primary: { usedPercent: 8, windowDurationMins: 10080, resetsAt: null },
+          },
+        },
+      },
+      0
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      windows: [{ label: "weekly", usedPercent: 8, windowSecs: 604800 }],
+    });
+  });
+
   it("accepts a primary-only weekly window returned by current Codex", () => {
     const result = parseRateLimitsResult(
       {

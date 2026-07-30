@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeHostKey, parseTailscaleStatus } from "../tailscale";
+import { describeTailscaleExecError, normalizeHostKey, parseTailscaleStatus } from "../tailscale";
 
 const STATUS = {
   Self: {
@@ -90,5 +90,27 @@ describe("parseTailscaleStatus", () => {
     expect(parseTailscaleStatus(null, [{ host: "blackpi" }])[0].found).toBe(false);
     expect(parseTailscaleStatus({ Peer: "nope" }, [{ host: "blackpi" }])[0].found).toBe(false);
     expect(parseTailscaleStatus({ Peer: { k: { DNSName: 5, Online: "yes" } } }, [{ host: "blackpi" }])[0].found).toBe(false);
+  });
+});
+
+describe("describeTailscaleExecError", () => {
+  it("includes command output that Node omits from Error.message", () => {
+    const error = Object.assign(new Error("Command failed: tailscale status --json"), {
+      code: 1,
+      stderr: "failed to connect to local tailscaled",
+    });
+    expect(describeTailscaleExecError(error)).toContain(
+      "exit 1: failed to connect to local tailscaled"
+    );
+  });
+
+  it("collapses multiline command output", () => {
+    const error = Object.assign(new Error("Command failed"), {
+      code: 1,
+      stdout: "first line\nsecond line",
+    });
+    expect(describeTailscaleExecError(error)).toBe(
+      "Command failed (exit 1: first line second line)"
+    );
   });
 });

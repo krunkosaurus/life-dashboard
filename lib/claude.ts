@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { recordFailure } from "./failures";
 import type { UsageFailure, UsageResult, UsageWindow } from "./types";
@@ -9,8 +10,8 @@ const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const EXTRA_HEADERS: Record<string, string> = {
   "anthropic-beta": "oauth-2025-04-20",
   "Content-Type": "application/json",
-  "User-Agent": "claude-code/2.1.33",
 };
+let cachedClaudeUserAgent: string | null = null;
 
 const CREDS_PATH = path.join(os.homedir(), ".claude", ".credentials.json");
 const REFRESH_URL = "https://platform.claude.com/v1/oauth/token";
@@ -23,11 +24,23 @@ const REFRESH_SKEW_MS = 60_000; // refresh tokens 1 minute before stated expiry
 // defaults.
 const SUCCESS_TTL_MS  = 90_000;
 const ERROR_TTL_MS    = 5 * 60_000;
+const AUTH_RECOVERY_TTL_MS = 15_000;
 const RATELIMIT_TTL_MS = 15 * 60_000;
-let cache: { at: number; ttl: number; result: UsageResult } | null = null;
+const MAX_RATELIMIT_TTL_MS = 4 * 60 * 60_000;
+let refreshRateLimitStreak = 0;
+const rejectedAccessFingerprints = new Set<string>();
+let inFlight: Promise<UsageResult> | null = null;
+let cache: {
+  at: number;
+  ttl: number;
+  result: UsageResult;
+  // Credential generation observed when this fetch started. A newer valid
+  // dashboard/Keychain/file credential can recover a cached auth failure.
+  credentialFingerprint: string | null;
+} | null = null;
 
-// In-memory token state. We never write back to ~/.claude/.credentials.json
-// to avoid racing with the Claude Code CLI.
+// In-memory token state. We never write back to Claude Code's Keychain or
+// ~/.claude/.credentials.json; rotated dashboard credentials use our own cache.
 let memToken: { accessToken: string; expiresAt: number; refreshToken: string } | null = null;
 
 // Last successful fetch — used as a fallback when a current fetch fails so
@@ -41,6 +54,7 @@ let lastGood: LastGood | null = null;
 
 const CACHE_DIR = process.env.CLAUDE_CACHE_DIR || path.join(process.cwd(), ".cache");
 const LAST_GOOD_PATH = path.join(CACHE_DIR, "claude-last-good.json");
+const OAUTH_CACHE_PATH = path.join(CACHE_DIR, "claude-oauth.json");
 
 function isUsageWindow(w: unknown): w is UsageWindow {
   if (!w || typeof w !== "object") return false;
@@ -133,25 +147,115 @@ export function normalizeClaudeUsage(raw: unknown): UsageResult {
 
 export async function fetchClaudeUsage(): Promise<UsageResult> {
   const now = Date.now();
-  if (cache && now - cache.at < cache.ttl) return cache.result;
-  const fresh = await doFetchClaudeUsage();
-  cache = { at: now, ttl: fresh.ttl, result: fresh.result };
-  return fresh.result;
+  if (cache && now - cache.at < cache.ttl) {
+    const cachedFetchFailed = !cache.result.ok || cache.result.staleReason != null;
+    if (!cachedFetchFailed) return cache.result;
+
+    // Claude Code may refresh its Keychain credential while this process is
+    // backing off from an auth failure. Do not keep serving that stale failure
+    // for the rest of the error/Retry-After TTL once a newer usable credential
+    // is available.
+    const currentCredential = loadStoredCreds();
+    if (!hasNewerUsableCredential(cache.credentialFingerprint, currentCredential, now)) {
+      return cache.result;
+    }
+  }
+
+  // Multiple tabs/manual refreshes can arrive together. OAuth refresh tokens
+  // rotate, so concurrent refreshes would race each other and invite 429s.
+  // Share one in-flight fetch across every caller.
+  if (inFlight) return inFlight;
+
+  const credentialFingerprintAtStart = credentialFingerprint(loadStoredCreds());
+  const request = doFetchClaudeUsage().then((fresh) => {
+    cache = {
+      at: now,
+      ttl: fresh.ttl,
+      result: fresh.result,
+      credentialFingerprint: credentialFingerprintAtStart,
+    };
+    return fresh.result;
+  });
+  inFlight = request;
+  try {
+    return await request;
+  } finally {
+    if (inFlight === request) inFlight = null;
+  }
 }
 
 type FetchResult = { result: UsageResult; ttl: number };
 
-type StoredOauth = { accessToken: string; refreshToken: string; expiresAt: number };
+export type StoredOauth = { accessToken: string; refreshToken: string; expiresAt: number };
+
+export function credentialFingerprint(credential: StoredOauth | null): string | null {
+  if (!credential) return null;
+  return createHash("sha256")
+    .update(`${credential.expiresAt}\0${credential.accessToken}`)
+    .digest("base64url")
+    .slice(0, 16);
+}
+
+function accessTokenFingerprint(accessToken: string): string {
+  return createHash("sha256").update(accessToken).digest("base64url").slice(0, 16);
+}
+
+function rememberRejectedAccessToken(accessToken: string): void {
+  // Bound memory while remembering enough rotated tokens to avoid bouncing
+  // between two rejected credential stores on every poll.
+  if (rejectedAccessFingerprints.size >= 8) {
+    const oldest = rejectedAccessFingerprints.values().next().value;
+    if (typeof oldest === "string") rejectedAccessFingerprints.delete(oldest);
+  }
+  rejectedAccessFingerprints.add(accessTokenFingerprint(accessToken));
+}
+
+export function hasNewerUsableCredential(
+  cachedFingerprint: string | null,
+  current: StoredOauth | null,
+  nowMs: number,
+): boolean {
+  return current != null
+    && nowMs < current.expiresAt - REFRESH_SKEW_MS
+    && credentialFingerprint(current) !== cachedFingerprint;
+}
+
+function parseOauth(value: unknown): StoredOauth | null {
+  if (!value || typeof value !== "object") return null;
+  const o = value as Record<string, unknown>;
+  if (typeof o.accessToken !== "string" || o.accessToken.length === 0) return null;
+  if (typeof o.refreshToken !== "string" || o.refreshToken.length === 0) return null;
+  if (typeof o.expiresAt !== "number" || !Number.isFinite(o.expiresAt)) return null;
+  return { accessToken: o.accessToken, refreshToken: o.refreshToken, expiresAt: o.expiresAt };
+}
 
 function parseStoredCreds(raw: string): StoredOauth | null {
-  let o: { accessToken?: string; refreshToken?: string; expiresAt?: number } | undefined;
   try {
-    o = (JSON.parse(raw) as { claudeAiOauth?: typeof o }).claudeAiOauth;
+    const root = JSON.parse(raw) as { claudeAiOauth?: unknown };
+    return parseOauth(root.claudeAiOauth);
   } catch {
     return null;
   }
-  if (!o?.accessToken || !o?.refreshToken || !o?.expiresAt) return null;
-  return { accessToken: o.accessToken, refreshToken: o.refreshToken, expiresAt: o.expiresAt };
+}
+
+export function loadDashboardOauth(file = OAUTH_CACHE_PATH): StoredOauth | null {
+  try {
+    return parseOauth(JSON.parse(fs.readFileSync(file, "utf8")) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+export function persistDashboardOauth(oauth: StoredOauth, file = OAUTH_CACHE_PATH): void {
+  const tempFile = `${file}.${process.pid}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(tempFile, JSON.stringify(oauth), { encoding: "utf8", mode: 0o600 });
+    fs.chmodSync(tempFile, 0o600);
+    fs.renameSync(tempFile, file);
+  } catch {
+    try { fs.unlinkSync(tempFile); } catch { /* best effort */ }
+  }
 }
 
 // Most recently refreshed credential wins: it has the latest expiresAt and so
@@ -188,8 +292,13 @@ function readFileCreds(): StoredOauth | null {
   }
 }
 
+function loadStoredCredentialCandidates(): StoredOauth[] {
+  return [loadDashboardOauth(), readKeychainCreds(), readFileCreds()]
+    .filter((candidate): candidate is StoredOauth => candidate !== null);
+}
+
 function loadStoredCreds(): StoredOauth | null {
-  return pickFreshestCreds([readKeychainCreds(), readFileCreds()]);
+  return pickFreshestCreds(loadStoredCredentialCandidates());
 }
 
 type TokenResult = { token: string } | { error: string; retryAfterMs?: number };
@@ -202,32 +311,46 @@ export function orderRefreshTokens(
   mem: { refreshToken: string; expiresAt: number } | null,
   stored: { refreshToken: string; expiresAt: number },
 ): string[] {
-  const ordered = mem && mem.expiresAt > stored.expiresAt
-    ? [mem.refreshToken, stored.refreshToken]
-    : [stored.refreshToken, ...(mem ? [mem.refreshToken] : [])];
+  return orderRefreshCredentialTokens([mem, stored]);
+}
+
+export function orderRefreshCredentialTokens(
+  candidates: ({ refreshToken: string; expiresAt: number } | null)[],
+): string[] {
+  const ordered = candidates
+    .filter((candidate): candidate is { refreshToken: string; expiresAt: number } => candidate !== null)
+    .sort((a, b) => b.expiresAt - a.expiresAt)
+    .map((candidate) => candidate.refreshToken);
   return [...new Set(ordered)];
 }
 
-async function getValidToken(): Promise<TokenResult> {
-  // Use in-memory token if still valid.
-  if (memToken && Date.now() < memToken.expiresAt - REFRESH_SKEW_MS) {
-    return { token: memToken.accessToken };
+async function getValidToken(rejectedAccessToken?: string): Promise<TokenResult> {
+  // Re-read storage even when memory is still valid: Claude Code may have
+  // rotated a newer credential in the meantime. On a 401, exclude the token
+  // that just failed so recovery uses a different stored token or refreshes.
+  const stored = loadStoredCredentialCandidates();
+  const now = Date.now();
+  const usable = pickFreshestCreds([memToken, ...stored].filter((candidate) =>
+    candidate != null
+      && candidate.accessToken !== rejectedAccessToken
+      && !rejectedAccessFingerprints.has(accessTokenFingerprint(candidate.accessToken))
+      && now < candidate.expiresAt - REFRESH_SKEW_MS
+  ));
+  if (usable) {
+    memToken = { ...usable };
+    return { token: usable.accessToken };
   }
 
-  // Seed (or re-seed) memory from the freshest stored credential.
-  const oauth = loadStoredCreds();
-  if (!oauth) {
-    return { error: "cannot read Claude credentials (no Keychain item or ~/.claude/.credentials.json)" };
-  }
-  if (Date.now() < oauth.expiresAt - REFRESH_SKEW_MS) {
-    memToken = { accessToken: oauth.accessToken, expiresAt: oauth.expiresAt, refreshToken: oauth.refreshToken };
-    return { token: oauth.accessToken };
+  // Even a rejected/expired access token can carry a usable refresh token.
+  const refreshTokens = orderRefreshCredentialTokens([memToken, ...stored]);
+  if (refreshTokens.length === 0) {
+    return { error: "cannot read Claude credentials (no dashboard cache, Keychain item, or ~/.claude/.credentials.json)" };
   }
 
   // Token is expired (or near it) — refresh against the OAuth provider,
   // falling through to the next candidate when one is rejected outright.
   let lastError = "no refresh token available";
-  for (const refreshToken of orderRefreshTokens(memToken, oauth)) {
+  for (const refreshToken of refreshTokens) {
     const attempt = await refreshAccessToken(refreshToken);
     if ("token" in attempt) return { token: attempt.token };
     if (attempt.stop) return { error: attempt.error, retryAfterMs: attempt.retryAfterMs };
@@ -242,18 +365,18 @@ type RefreshAttempt =
   // neither is specific to the token that was sent).
   | { error: string; stop: boolean; retryAfterMs?: number };
 
-async function refreshAccessToken(refreshToken: string): Promise<RefreshAttempt> {
-  // RFC 6749 §3.2 requires application/x-www-form-urlencoded for token
-  // endpoint requests; sending JSON returns HTTP 400 invalid_request.
+export async function refreshAccessToken(refreshToken: string): Promise<RefreshAttempt> {
+  // Match Claude Code's current OAuth client: Anthropic's token endpoint
+  // expects a JSON body for refresh-token exchanges.
   try {
     const res = await fetch(REFRESH_URL, {
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "claude-code/2.1.33",
+        "User-Agent": getClaudeUserAgent(),
       },
-      body: new URLSearchParams({
+      body: JSON.stringify({
         grant_type: "refresh_token",
         refresh_token: refreshToken,
         client_id: CLIENT_ID,
@@ -262,10 +385,13 @@ async function refreshAccessToken(refreshToken: string): Promise<RefreshAttempt>
       signal: AbortSignal.timeout(5000),
     });
     if (res.status === 429) {
-      // The refresh endpoint is rate limiting us. Back off for the full
-      // Retry-After window (default 15m) instead of the 5m error TTL, so we
-      // stop hammering and making it worse.
-      const ttl = parseRetryAfter(res.headers.get("Retry-After")) ?? RATELIMIT_TTL_MS;
+      // Honor Retry-After. Without one, progressively back off repeated
+      // failures so a prolonged outage cannot turn into a 15-minute hammer.
+      const ttl = calculateRateLimitBackoff(
+        parseRetryAfter(res.headers.get("Retry-After")),
+        refreshRateLimitStreak,
+      );
+      refreshRateLimitStreak += 1;
       const retryAt = new Date(Date.now() + ttl).toLocaleTimeString();
       return { error: `token refresh rate limited — retrying after ${retryAt}`, stop: true, retryAfterMs: ttl };
     }
@@ -283,12 +409,45 @@ async function refreshAccessToken(refreshToken: string): Promise<RefreshAttempt>
       expiresAt: Date.now() + body.expires_in * 1000,
       refreshToken: body.refresh_token ?? refreshToken,
     };
+    // Keep the dashboard's rotated credential in its own private cache. Do
+    // not mutate Claude Code's Keychain/file; whichever source refreshes next
+    // simply becomes the freshest candidate.
+    persistDashboardOauth(memToken);
+    refreshRateLimitStreak = 0;
     return { token: memToken.accessToken };
   } catch (e) {
     // Network failure / timeout — not token-specific, so retrying the next
     // candidate would just double the latency. Bail for this cycle.
     return { error: `token refresh failed: ${(e as Error).message}`, stop: true };
   }
+}
+
+export function claudeUserAgentFromVersion(versionOutput: string): string {
+  const version = versionOutput.match(/\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/)?.[0];
+  return version ? `claude-code/${version}` : "claude-code/life-dashboard";
+}
+
+function getClaudeUserAgent(): string {
+  if (cachedClaudeUserAgent) return cachedClaudeUserAgent;
+  try {
+    const version = execFileSync("claude", ["--version"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    cachedClaudeUserAgent = claudeUserAgentFromVersion(version);
+  } catch {
+    cachedClaudeUserAgent = "claude-code/life-dashboard";
+  }
+  return cachedClaudeUserAgent;
+}
+
+export function calculateRateLimitBackoff(retryAfterMs: number | null, streak: number): number {
+  if (retryAfterMs != null && retryAfterMs > 0) {
+    return retryAfterMs;
+  }
+  const exponent = Math.max(0, Math.min(streak, 4));
+  return Math.min(RATELIMIT_TTL_MS * (2 ** exponent), MAX_RATELIMIT_TTL_MS);
 }
 
 // Recent fetch failures, surfaced in the API payload so the UI can show a
@@ -348,9 +507,17 @@ async function fetchFresh(): Promise<FetchResult> {
   const t = await getValidToken();
   if ("error" in t) return { result: { ok: false, error: t.error }, ttl: t.retryAfterMs ?? ERROR_TTL_MS };
 
+  return fetchUsageWithToken(t.token, true);
+}
+
+export async function fetchUsageWithToken(
+  token: string,
+  allowAuthRecovery: boolean,
+  recoverToken: (rejectedAccessToken?: string) => Promise<TokenResult> = getValidToken,
+): Promise<FetchResult> {
   try {
     const res = await fetch(USAGE_URL, {
-      headers: { Authorization: `Bearer ${t.token}`, ...EXTRA_HEADERS },
+      headers: { Authorization: `Bearer ${token}`, "User-Agent": getClaudeUserAgent(), ...EXTRA_HEADERS },
       cache: "no-store",
       signal: AbortSignal.timeout(5000),
     });
@@ -367,15 +534,31 @@ async function fetchFresh(): Promise<FetchResult> {
       };
     }
     if (res.status === 401) {
-      // Clear in-memory token so the next call re-reads from disk and
-      // attempts a refresh.
-      memToken = null;
+      rememberRejectedAccessToken(token);
+      if (allowAuthRecovery) {
+        // Token rotation can invalidate an otherwise unexpired access token.
+        // Re-read storage or refresh, then retry this usage request once in the
+        // same dashboard refresh instead of caching a five-minute failure.
+        try { await res.body?.cancel(); } catch { /* best effort */ }
+        const recovered = await recoverToken(token);
+        if ("token" in recovered) return fetchUsageWithToken(recovered.token, false, recoverToken);
+        if (memToken?.accessToken === token) memToken = null;
+        return {
+          result: { ok: false, error: `automatic token recovery failed: ${recovered.error}` },
+          ttl: recovered.retryAfterMs ?? ERROR_TTL_MS,
+        };
+      }
+      if (memToken?.accessToken === token) memToken = null;
     }
     if (!res.ok) {
       let detail = "";
       try { detail = describeError(await res.json()); } catch { /* not JSON */ }
-      return { result: { ok: false, error: `usage endpoint HTTP ${res.status}${detail}` }, ttl: ERROR_TTL_MS };
+      return {
+        result: { ok: false, error: `usage endpoint HTTP ${res.status}${detail}` },
+        ttl: res.status === 401 ? AUTH_RECOVERY_TTL_MS : ERROR_TTL_MS,
+      };
     }
+    refreshRateLimitStreak = 0;
     return { result: normalizeClaudeUsage(await res.json()), ttl: SUCCESS_TTL_MS };
   } catch (e) {
     return { result: { ok: false, error: `usage endpoint fetch failed: ${(e as Error).message}` }, ttl: ERROR_TTL_MS };
@@ -385,7 +568,7 @@ async function fetchFresh(): Promise<FetchResult> {
 function parseRetryAfter(header: string | null): number | null {
   if (!header) return null;
   const secs = Number(header);
-  if (Number.isFinite(secs) && secs > 0) return Math.min(secs, 3600) * 1000;
+  if (Number.isFinite(secs) && secs > 0) return secs * 1000;
   const dateMs = Date.parse(header);
   if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
   return null;

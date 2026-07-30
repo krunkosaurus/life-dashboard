@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,7 +10,23 @@ import {
   loadLastGoodFromDisk,
   orderRefreshTokens,
   applyStaleFallback,
+  hasNewerUsableCredential,
+  refreshAccessToken,
+  calculateRateLimitBackoff,
+  fetchUsageWithToken,
+  claudeUserAgentFromVersion,
+  loadDashboardOauth,
+  orderRefreshCredentialTokens,
+  persistDashboardOauth,
+  credentialFingerprint,
 } from "../claude";
+
+const dashboardOauthTestFile = path.join(os.tmpdir(), `life-dashboard-oauth-test-${process.pid}.json`);
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  fs.rmSync(dashboardOauthTestFile, { force: true });
+});
 
 describe("normalizeClaudeUsage", () => {
   it("returns two windows labelled '5h' and 'weekly'", () => {
@@ -80,6 +96,159 @@ describe("orderRefreshTokens", () => {
 
   it("handles a missing in-memory token", () => {
     expect(orderRefreshTokens(null, stored)).toEqual(["rs"]);
+  });
+
+  it("orders and deduplicates every stored credential candidate", () => {
+    expect(orderRefreshCredentialTokens([
+      { refreshToken: "old", expiresAt: 1000 },
+      null,
+      { refreshToken: "new", expiresAt: 3000 },
+      { refreshToken: "old", expiresAt: 2000 },
+    ])).toEqual(["new", "old"]);
+  });
+});
+
+describe("dashboard OAuth cache", () => {
+  const oauth = {
+    accessToken: "private-access-token-for-test",
+    refreshToken: "private-refresh-token-for-test",
+    expiresAt: 1_700_003_600_000,
+  };
+
+  it("persists rotated credentials privately for restart recovery", () => {
+    persistDashboardOauth(oauth, dashboardOauthTestFile);
+
+    expect(loadDashboardOauth(dashboardOauthTestFile)).toEqual(oauth);
+    expect(fs.statSync(dashboardOauthTestFile).mode & 0o777).toBe(0o600);
+  });
+
+  it("rejects malformed cached credentials", () => {
+    fs.writeFileSync(dashboardOauthTestFile, JSON.stringify({ accessToken: "incomplete" }));
+    expect(loadDashboardOauth(dashboardOauthTestFile)).toBe(null);
+  });
+});
+
+describe("claudeUserAgentFromVersion", () => {
+  it("tracks the installed Claude Code version", () => {
+    expect(claudeUserAgentFromVersion("2.1.215 (Claude Code)"))
+      .toBe("claude-code/2.1.215");
+  });
+
+  it("uses a stable fallback for an unknown version shape", () => {
+    expect(claudeUserAgentFromVersion("Claude Code development build"))
+      .toBe("claude-code/life-dashboard");
+  });
+});
+
+describe("credential-aware cache recovery", () => {
+  const nowMs = 1_700_000_000_000;
+  const current = {
+    accessToken: "new-access",
+    refreshToken: "new-refresh",
+    expiresAt: nowMs + 3600_000,
+  };
+
+  it("detects a newer valid credential", () => {
+    expect(hasNewerUsableCredential("old-fingerprint", current, nowMs)).toBe(true);
+  });
+
+  it("ignores unchanged or expired credentials", () => {
+    expect(hasNewerUsableCredential(credentialFingerprint(current), current, nowMs)).toBe(false);
+    expect(hasNewerUsableCredential("old-fingerprint", { ...current, expiresAt: nowMs }, nowMs)).toBe(false);
+  });
+});
+
+describe("refreshAccessToken", () => {
+  it("matches Claude Code's JSON refresh request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: "invalid_grant" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await refreshAccessToken("refresh-token-for-test");
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toMatchObject({ "Content-Type": "application/json" });
+    expect(JSON.parse(String(init.body))).toEqual({
+      grant_type: "refresh_token",
+      refresh_token: "refresh-token-for-test",
+      client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+      scope: "user:profile user:inference user:sessions:claude_code user:mcp_servers",
+    });
+  });
+});
+
+describe("calculateRateLimitBackoff", () => {
+  it("uses an explicit Retry-After value", () => {
+    expect(calculateRateLimitBackoff(42_000, 4)).toBe(42_000);
+  });
+
+  it("backs off progressively when the server omits Retry-After", () => {
+    expect([0, 1, 2, 3, 4, 5].map((streak) =>
+      calculateRateLimitBackoff(null, streak)
+    )).toEqual([
+      15 * 60_000,
+      30 * 60_000,
+      60 * 60_000,
+      2 * 60 * 60_000,
+      4 * 60 * 60_000,
+      4 * 60 * 60_000,
+    ]);
+  });
+
+  it("honors long explicit Retry-After values", () => {
+    expect(calculateRateLimitBackoff(24 * 60 * 60_000, 0)).toBe(24 * 60 * 60_000);
+  });
+});
+
+describe("automatic 401 recovery", () => {
+  it("reloads credentials and retries the usage request once", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: { type: "authentication_error", message: "expired" } }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(JSON.stringify(fixture), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    const recoverToken = vi.fn().mockResolvedValue({ token: "replacement-access-token" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchUsageWithToken("rejected-access-token", true, recoverToken);
+
+    expect(result.result.ok).toBe(true);
+    expect(recoverToken).toHaveBeenCalledWith("rejected-access-token");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer rejected-access-token",
+    });
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer replacement-access-token",
+    });
+  });
+
+  it("stops after one retry and schedules a prompt follow-up attempt", async () => {
+    const unauthorized = () => new Response(
+      JSON.stringify({ error: { type: "authentication_error", message: "expired" } }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    );
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(unauthorized())
+      .mockResolvedValueOnce(unauthorized());
+    const recoverToken = vi.fn().mockResolvedValue({ token: "second-rejected-token" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchUsageWithToken("first-rejected-token", true, recoverToken);
+
+    expect(result).toMatchObject({
+      result: { ok: false, error: expect.stringContaining("usage endpoint HTTP 401") },
+      ttl: 15_000,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(recoverToken).toHaveBeenCalledOnce();
   });
 });
 

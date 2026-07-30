@@ -710,6 +710,22 @@ describe("getLiveLog (integration, stubbed fetch)", () => {
     expect(fetchMock.mock.calls.length).toBe(callsAfterFirst); // all cache hits
   });
 
+  it("coalesces concurrent full-feed requests", async () => {
+    mockConfig(liveLogConfig());
+    stubFetch({
+      "https://api.example.com/nonce": () => ({ body: { data: { nonce: "n" } } }),
+      "https://api.example.com/login": () => ({ body: { data: { token: jwt(NOW_S + 86400) } } }),
+      "https://api.example.com/items": () => ({ body: { data: { items: [] } } }),
+      "https://api.example.com/buys": () => ({ body: { data: { items: [] } } }),
+      "https://api.example.com/metrics": () => ({ body: { data: { activeCount: 41 } } }),
+    });
+
+    const [first, second] = await Promise.all([getLiveLog(NOW), getLiveLog(NOW)]);
+
+    expect(first).toEqual(second);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
   it("surfaces per-source errors while other sources still render", async () => {
     mockConfig(liveLogConfig({ stats: [] }));
     stubFetch({
@@ -986,6 +1002,29 @@ describe("getLiveLog (integration, stubbed fetch)", () => {
     expect(result.stale).toBe(true);
     expect(result.events.map(e => e.title)).toEqual(["bob", "ada"]);
     expect(result.staleReason).toBeTruthy();
+  });
+
+  it("backs off failed sources while serving their last-good data", async () => {
+    mockConfig(liveLogConfig({ stats: [] }));
+    stubFetch({
+      "https://api.example.com/nonce": () => ({ body: { data: { nonce: "n" } } }),
+      "https://api.example.com/login": () => ({ body: { data: { token: jwt(NOW_S + 86400) } } }),
+      "https://api.example.com/items": () => ({ body: { data: { items: [{ user: "ada", created: NOW_S - 120 }] } } }),
+      "https://api.example.com/buys": () => ({ body: { data: { items: [{ user: "bob", created: NOW_S - 60 }] } } }),
+    });
+    await getLiveLog(NOW);
+
+    stubFetch({
+      "https://api.example.com/": () => ({ status: 503, body: { message: "down" } }),
+    });
+    const failedAt = new Date(NOW.getTime() + 2 * 60_000);
+    const failed = await getLiveLog(failedAt);
+    const callsAfterFailure = fetchMock.mock.calls.length;
+    const backedOff = await getLiveLog(new Date(failedAt.getTime() + 60_000));
+
+    expect(failed).toMatchObject({ ok: true, stale: true });
+    expect(backedOff).toMatchObject({ ok: true, stale: true });
+    expect(fetchMock.mock.calls.length).toBe(callsAfterFailure);
   });
 
   it("reports a clean error when the signing key env is missing", async () => {

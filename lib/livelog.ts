@@ -27,6 +27,9 @@ const FETCH_TIMEOUT_MS = 10_000;
 // The dashboard polls every refreshSeconds (default 60s); cache successful
 // fetches per source for the same beat so a poll never refans every request.
 const SUCCESS_TTL_MS = 60_000;
+// A timed-out upstream should not be hammered once per open dashboard tab.
+// Keep serving its last-good data for a few polls before trying it again.
+const ERROR_TTL_MS = 5 * 60_000;
 // Re-login when the bearer token has less than this long left to live.
 const TOKEN_SKEW_S = 600;
 // Rows stamped further in the future than this are treated as bogus.
@@ -589,9 +592,12 @@ type LastGood = {
 
 const sourceCache = new Map<string, CacheEntry<LiveLogEvent[]>>();
 const statsCache = new Map<string, CacheEntry<LiveLogStat[]>>();
+const sourceFailureCache = new Map<string, CacheEntry<string>>();
+const statsFailureCache = new Map<string, CacheEntry<string>>();
 let failures: UsageFailure[] = [];
 let lastGood: LastGood | null = null;
 let lastGoodLoaded = false;
+let liveLogInFlight: Promise<LiveLogResult> | null = null;
 
 function loadLastGoodOnce(): void {
   if (lastGoodLoaded) return;
@@ -754,14 +760,29 @@ async function resolveSource(source: LiveLogSourceInput, cfg: LiveLogConfig, now
   if (cached && now.getTime() - cached.at < SUCCESS_TTL_MS) {
     return { events: windowEvents(cached.value, source, cfg, nowS), stale: false, ok: true };
   }
+  const recentFailure = sourceFailureCache.get(key);
+  if (recentFailure && now.getTime() - recentFailure.at < ERROR_TTL_MS) {
+    const fallback = cached?.value ?? lastGood?.events[key];
+    if (fallback) {
+      return {
+        events: windowEvents(fallback, source, cfg, nowS),
+        error: recentFailure.value,
+        stale: true,
+        ok: false,
+      };
+    }
+    return { events: [], error: recentFailure.value, stale: false, ok: false };
+  }
   try {
     const { events, enrichError } = await fetchSourceEvents(source, cfg, now);
     sourceCache.set(key, { at: now.getTime(), value: events });
+    sourceFailureCache.delete(key);
     // A failed enrichment still yields usable rows; surface it without
     // discarding them or marking the source stale.
     return { events, stale: false, ok: true, ...(enrichError ? { error: enrichError } : {}) };
   } catch (e) {
     const message = noteFailure(source.id, (e as Error).message, nowS);
+    sourceFailureCache.set(key, { at: now.getTime(), value: message });
     const fallback = cached?.value ?? lastGood?.events[key];
     if (fallback) return { events: windowEvents(fallback, source, cfg, nowS), error: message, stale: true, ok: false };
     return { events: [], error: message, stale: false, ok: false };
@@ -776,13 +797,26 @@ async function resolveStats(group: LiveLogStatGroupInput, index: number, cfg: Li
     return { stats: cached.value, stale: false, ok: true };
   }
   const context = `stats[${index}] ${group.items[0]?.label ?? ""}`.trim();
+  const recentFailure = statsFailureCache.get(key);
+  if (recentFailure && now.getTime() - recentFailure.at < ERROR_TTL_MS) {
+    const fallback = cached?.value ?? lastGood?.stats[key];
+    if (fallback) return { stats: fallback, error: recentFailure.value, stale: true, ok: false };
+    return {
+      stats: group.items.map(item => ({ label: item.label, value: "—" })),
+      error: recentFailure.value,
+      stale: false,
+      ok: false,
+    };
+  }
   try {
     const json = await authedGet(buildUrl(group.api, group.params, now), cfg.auth, nowS);
     const stats = extractStats(group, json);
     statsCache.set(key, { at: now.getTime(), value: stats });
+    statsFailureCache.delete(key);
     return { stats, stale: false, ok: true };
   } catch (e) {
     const message = noteFailure(context, (e as Error).message, nowS);
+    statsFailureCache.set(key, { at: now.getTime(), value: message });
     const fallback = cached?.value ?? lastGood?.stats[key];
     if (fallback) return { stats: fallback, error: message, stale: true, ok: false };
     // Keep tile layout stable: failed groups render as em-dashes.
@@ -819,10 +853,13 @@ export function resetLiveLogStateForTests(): void {
   loginInFlight = null;
   sourceCache.clear();
   statsCache.clear();
+  sourceFailureCache.clear();
+  statsFailureCache.clear();
   enrichCache.clear();
   failures = [];
   lastGood = null;
   lastGoodLoaded = false;
+  liveLogInFlight = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -830,6 +867,17 @@ export function resetLiveLogStateForTests(): void {
 // ---------------------------------------------------------------------------
 
 export async function getLiveLog(now = new Date()): Promise<LiveLogResult> {
+  if (liveLogInFlight) return liveLogInFlight;
+  const request = getLiveLogFresh(now);
+  liveLogInFlight = request;
+  try {
+    return await request;
+  } finally {
+    if (liveLogInFlight === request) liveLogInFlight = null;
+  }
+}
+
+async function getLiveLogFresh(now: Date): Promise<LiveLogResult> {
   const cfg = loadConfig().liveLog;
   if (!cfg) {
     return { ok: false, error: 'no live log configured — add a "liveLog" block to config.local.json', hidden: true };

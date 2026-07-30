@@ -67,7 +67,7 @@ export type ServerStatus = {
 };
 
 export type ServersResult =
-  | { ok: true; servers: ServerStatus[]; checkedAt: number }
+  | { ok: true; servers: ServerStatus[]; checkedAt: number; staleReason?: string }
   | { ok: false; error: string };
 
 export type OuraSleepSummary = {

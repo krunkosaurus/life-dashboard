@@ -149,9 +149,9 @@ export default function Page() {
         <UsagePanel title="Codex" data={codex} />
       </div>
 
-      <LiveLogPanel data={liveLog} />
-
       <ChecklistPanel data={checklists} />
+
+      <LiveLogPanel data={liveLog} />
 
       <AnalyticsPanel
         data={analytics}
@@ -238,8 +238,20 @@ function ServersPanel({ data }: { data: ServersResult | null }) {
       title="Servers"
       collapsed={collapsed}
       onToggle={() => setUserExpanded(collapsed)}
-      footer={<span style={{ color: allUp ? "#34d399" : "#ef4444" }}>{up}/{total} online</span>}
+      footer={
+        <span
+          style={{ color: data.staleReason ? "#f59e0b" : allUp ? "#34d399" : "#ef4444" }}
+          title={data.staleReason}
+        >
+          {up}/{total} online{data.staleReason ? " · stale" : ""}
+        </span>
+      }
     >
+      {data.staleReason && (
+        <p style={{ color: "#f59e0b", fontSize: 12, margin: 0 }}>
+          Showing the last successful Tailscale status — {data.staleReason}
+        </p>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 }}>
         {data.servers.map(s => <ServerRow key={s.host} server={s} />)}
       </div>
