@@ -431,6 +431,7 @@ export function parseConfig(
         if (typeof o.title !== "string" || typeof o.start !== "string") return [];
         const out: ManualEventInput = { title: o.title, start: o.start };
         if (o.pinned === true) out.pinned = true;
+        if (o.keepPast === true) out.keepPast = true;
         return [out];
       })
     : [];

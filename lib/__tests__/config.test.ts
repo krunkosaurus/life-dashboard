@@ -42,11 +42,11 @@ describe("parseConfig", () => {
     expect(parseConfig({ icsUrl: "<paste your private .ics URL here>" }, {}).icsUrl).toBeNull();
   });
 
-  it("parses manualEvents, drops malformed entries, preserves explicit pinned", () => {
+  it("parses manualEvents, drops malformed entries, preserves explicit flags", () => {
     const cfg = parseConfig(
       {
         manualEvents: [
-          { title: "Flight", start: "2099-06-15T08:00:00Z", pinned: true },
+          { title: "Flight", start: "2099-06-15T08:00:00Z", pinned: true, keepPast: true },
           { title: "Birthday", start: "2099-09-12" },
           { title: 123, start: "2099-01-01" },             // bad title -> dropped
           { title: "No start" },                            // missing start -> dropped
@@ -56,7 +56,7 @@ describe("parseConfig", () => {
       {}
     );
     expect(cfg.manualEvents).toEqual([
-      { title: "Flight", start: "2099-06-15T08:00:00Z", pinned: true },
+      { title: "Flight", start: "2099-06-15T08:00:00Z", pinned: true, keepPast: true },
       { title: "Birthday", start: "2099-09-12" },
     ]);
   });

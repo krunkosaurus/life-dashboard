@@ -1,20 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
+import { formatCountdown } from "@/lib/countdown";
 import { getMonthAccent } from "@/lib/monthColors";
-
-// Pad with figure space (U+2007) — same width as a tabular digit, so the
-// layout stays stable without showing a leading zero.
-function pad(n: number) {
-  return n.toString().padStart(2, "\u2007");
-}
-
-function parts(secs: number) {
-  const d = Math.floor(secs / 86400);
-  const h = Math.floor((secs % 86400) / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = Math.floor(secs % 60);
-  return { d, h, m, s };
-}
 
 export function CountdownCard({ title, start, pinned }: {
   title: string; start: number; pinned: boolean;
@@ -24,8 +11,7 @@ export function CountdownCard({ title, start, pinned }: {
     const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(id);
   }, []);
-  const remaining = Math.max(0, start - now);
-  const { d, h, m, s } = parts(remaining);
+  const remaining = start - now;
   const accent = getMonthAccent(new Date(start * 1000).getMonth());
   const when = new Date(start * 1000).toLocaleString(undefined, {
     weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
@@ -42,7 +28,7 @@ export function CountdownCard({ title, start, pinned }: {
         {pinned && <span style={{ fontSize: 10, color: accent.text, letterSpacing: 1, flexShrink: 0 }}>PINNED</span>}
       </div>
       <div style={{ fontVariantNumeric: "tabular-nums", fontSize: 20, fontWeight: 600, color: accent.solid, letterSpacing: 0.5, whiteSpace: "nowrap" }}>
-        {d}d {pad(h)}h {pad(m)}m {pad(s)}s
+        {formatCountdown(remaining)}
       </div>
       <div style={{ fontSize: 12, color: accent.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{when}</div>
     </article>
