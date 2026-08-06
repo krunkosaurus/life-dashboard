@@ -36,6 +36,7 @@ export type ManualEventInput = {
   title: string;
   start: string;       // ISO 8601 ("2026-06-15T08:00:00Z") or date-only ("2026-09-12")
   pinned?: boolean;
+  keepPast?: boolean;  // retain after it passes so the countdown can become negative
 };
 
 export type BirthdayInput = {

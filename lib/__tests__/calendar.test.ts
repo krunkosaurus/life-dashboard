@@ -58,6 +58,17 @@ describe("parseManualEvents", () => {
     );
     expect(events[0].pinned).toBe(true);
   });
+
+  it("retains a past event when keepPast is enabled", () => {
+    const events = parseManualEvents(
+      [{ title: "Elapsed milestone", start: "2000-01-01", keepPast: true }],
+      [],
+      NOW,
+    );
+    expect(events).toEqual([
+      { title: "Elapsed milestone", start: 946684800, pinned: false },
+    ]);
+  });
 });
 
 describe("mergeEvents", () => {

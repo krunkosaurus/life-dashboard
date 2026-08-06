@@ -110,7 +110,8 @@ bubble to the top):
   string `Date.parse` understands: ISO 8601 (`"2026-06-15T08:00:00Z"`), a
   date-only string (`"2026-09-12"`, treated as midnight UTC), or a verbose form
   like `"Jul 1 2026 17:00:00 GMT+0800"`. `pinned: true` sorts an event to the top.
-  Past events are dropped automatically.
+  Past events are dropped automatically unless `keepPast: true`; retained events
+  continue counting below zero after their start time.
 - **`icsUrl`** — a private `.ics` URL (e.g. Google Calendar's "Secret address in
   iCal format"). Set to `null` to disable. Note: Google Workspace organizational
   calendars only expose a *public* iCal URL, not a secret one — manual entries are

@@ -44,7 +44,7 @@ export function parseManualEvents(items: ManualEventInput[], pinnedKeywords: str
     const t = Date.parse(e.start);
     if (!Number.isFinite(t)) continue;
     const start = Math.floor(t / 1000);
-    if (start < nowSec) continue;
+    if (start < nowSec && e.keepPast !== true) continue;
     const explicit = e.pinned === true;
     const keyword = lowered.some(p => e.title.toLowerCase().includes(p));
     out.push({ title: e.title, start, pinned: explicit || keyword });
