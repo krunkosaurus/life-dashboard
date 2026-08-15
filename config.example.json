@@ -159,6 +159,13 @@
           { "field": "period", "map": { "monthly": "Monthly", "annual": "Annual" }, "color": "#7aa2f7" },
           { "field": "plan" }
         ],
+        "collapse": [
+          {
+            "by": ["username", "provider"],
+            "withinMinutes": 30,
+            "when": { "field": "status", "equals": "expired" }
+          }
+        ],
         "variants": [
           { "when": [{ "field": "status", "equals": "trialing" }], "label": "Trial started", "color": "#f59e0b" },
           {

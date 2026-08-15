@@ -382,7 +382,7 @@ fractions).
 
 **Sources** — each is one feed: `{ id, label, color?, api, params?, dates?,
 itemsPath, time, title?, detail?, value?, badges?, variants?, require?,
-exclude?, enrich?, windowHours?, limit? }`.
+exclude?, collapse?, enrich?, windowHours?, limit? }`.
 
 - `itemsPath` — dotted path to the response's row array (envelope-agnostic).
 - `time` — row field holding the timestamp; unix seconds, milliseconds, and ISO
@@ -403,6 +403,11 @@ exclude?, enrich?, windowHours?, limit? }`.
   overrides the row's label/color. Use an array to require several conditions
   at once (e.g. `status` in `[active, grace]` **and** `trialEnd` present →
   "Converted"), which keeps a churned row from matching a "converted" rule.
+- `collapse` — suppress retry noise while keeping the newest row in each
+  adjacent cluster: `{ by: ["username", "provider"], withinMinutes: 30,
+  when? }`. Every `by` field must be present. A conditional rule only groups
+  matching rows, so failed checkout retries can collapse without hiding real
+  cancellations. Collapse runs before `limit`.
 - `enrich` — resolve extra fields per row from a second endpoint:
   `{ api, key, fields, ttlHours?, max? }`. `api` may contain `${value}` (the
   `key` field's value); `fields` maps a row field name to a response path.
@@ -412,7 +417,8 @@ exclude?, enrich?, windowHours?, limit? }`.
 - `dates` — fan out one request per entry, substituting `${date}` into `params`
   (for day-bucketed endpoints: `["${today}", "${yesterday}"]`).
 
-**Conditions** (used by `require`, `exclude`, and `variants.when`) are
+**Conditions** (used by `require`, `exclude`, `variants.when`, and
+`collapse.when`) are
 `{ field, equals? , in?, nonNull? }`. Values compare as strings, `in` accepts a
 list, and `nonNull` treats `null`/missing/empty-string as absent.
 
