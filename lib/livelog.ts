@@ -197,6 +197,38 @@ const DEFAULT_EVENT_COLOR = "#7aa2f7";
 // A raw row that passed the gates, paired with its parsed timestamp.
 export type SelectedRow = { row: Record<string, unknown>; time: number; index: number };
 
+// Collapse adjacent retry-like rows after sorting newest-first. Matching uses
+// raw row fields (not rendered titles), and only rows satisfying a rule's
+// optional conditions participate. Missing identity fields are left alone so
+// anonymous events are never collapsed together by accident.
+export function collapseSourceRows(source: LiveLogSourceInput, selected: SelectedRow[]): SelectedRow[] {
+  const rules = source.collapse ?? [];
+  if (rules.length === 0 || selected.length < 2) return selected;
+
+  const previousByRule = rules.map(() => new Map<string, number>());
+  return selected.filter(entry => {
+    let collapsed = false;
+    rules.forEach((rule, ruleIndex) => {
+      const conditions = rule.when
+        ? Array.isArray(rule.when) ? rule.when : [rule.when]
+        : [];
+      if (conditions.length > 0 && !allMatch(entry.row, conditions)) return;
+
+      const values = rule.by.map(field => resolvePath(entry.row, field));
+      if (values.some(value => !fieldPresent(value))) return;
+      const key = JSON.stringify(values.map(value => String(value)));
+      const previousTime = previousByRule[ruleIndex].get(key);
+      if (previousTime !== undefined && previousTime - entry.time <= rule.withinMinutes * 60) {
+        collapsed = true;
+      }
+      // Advance through the retry chain even when this row is collapsed, so a
+      // run of closely-spaced attempts remains one cluster.
+      previousByRule[ruleIndex].set(key, entry.time);
+    });
+    return !collapsed;
+  });
+}
+
 // Pick the rows a source will contribute: drop non-objects, apply the
 // require/exclude gates, require a parseable in-window timestamp, sort newest
 // first, and cap. Kept separate from rendering so enrichment can run on just
@@ -237,7 +269,10 @@ export function selectSourceRowsWithStats(
     selected.push({ row, time, index });
   });
   selected.sort((a, b) => b.time - a.time || a.index - b.index);
-  return { selected: selected.slice(0, source.limit ?? DEFAULT_SOURCE_LIMIT), gateDropped, rowCount };
+  // Collapse before applying the cap so retries cannot crowd distinct events
+  // out of a small source limit.
+  const collapsed = collapseSourceRows(source, selected);
+  return { selected: collapsed.slice(0, source.limit ?? DEFAULT_SOURCE_LIMIT), gateDropped, rowCount };
 }
 
 // Render selected rows into feed events (labels, templates, badges).
@@ -632,7 +667,10 @@ function buildUrl(api: string, params: Record<string, string | number> | undefin
 }
 
 function sourceKey(source: LiveLogSourceInput): string {
-  return `${source.id}|${source.api}|${JSON.stringify(source.params ?? {})}|${JSON.stringify(source.dates ?? [])}`;
+  // Source caches hold rendered events, so every selection/rendering option
+  // belongs in the key—not just the request URL. This also prevents a newly
+  // added collapse or variant rule from reusing an old last-good snapshot.
+  return JSON.stringify(source);
 }
 
 function statsKey(group: LiveLogStatGroupInput): string {

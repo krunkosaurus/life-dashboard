@@ -284,6 +284,15 @@ export type LiveLogVariantInput = {
   color?: string;
 };
 
+// Collapse retry-like rows from one source while preserving the newest row in
+// each cluster. Every `by` field must be present; `when` limits the rule to a
+// particular kind of row so unrelated lifecycle events stay distinct.
+export type LiveLogCollapseInput = {
+  by: string[];
+  withinMinutes: number;
+  when?: LiveLogCondition | LiveLogCondition[];
+};
+
 // Resolve extra fields per row from a second endpoint (e.g. an id → profile
 // lookup), merged into the row before templating. Results are cached per key
 // for `ttlHours` and capped at `max` lookups per refresh, so the feed stays
@@ -310,6 +319,7 @@ export type LiveLogSourceInput = {
   value?: string;           // right-aligned text (e.g. "${amountInDollars} · {amountInTokens}⚡")
   badges?: LiveLogBadgeInput[];
   variants?: LiveLogVariantInput[];
+  collapse?: LiveLogCollapseInput[];
   // Row gates applied before anything renders. `require` keeps only rows where
   // every condition holds; `exclude` drops rows matching any condition. These
   // are the local backstop for server-side query filters — if an API ignores a

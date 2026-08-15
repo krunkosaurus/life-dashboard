@@ -214,6 +214,53 @@ describe("normalizeSourceRows", () => {
     const events = normalizeSourceRows(src, [{ created: NOW_S - 3 * 3600 }], NOW, 2);
     expect(events).toEqual([]);
   });
+
+  it("conditionally collapses retry clusters before applying the source limit", () => {
+    const source = makeSource({
+      title: "{attempt}",
+      limit: 3,
+      collapse: [{
+        by: ["user", "provider"],
+        withinMinutes: 30,
+        when: [
+          { field: "status", equals: "expired" },
+          { field: "rejection", nonNull: true },
+        ],
+      }],
+    });
+    const rows = [
+      { user: "ada", provider: "stripe", status: "expired", rejection: "declined", attempt: "ada-new", created: NOW_S - 60 },
+      { user: "ada", provider: "stripe", status: "expired", rejection: "declined", attempt: "ada-retry-2", created: NOW_S - 120 },
+      { user: "ada", provider: "stripe", status: "expired", rejection: "declined", attempt: "ada-retry-1", created: NOW_S - 180 },
+      { user: "bob", provider: "stripe", status: "expired", rejection: "declined", attempt: "bob", created: NOW_S - 240 },
+      { user: "cy", provider: "stripe", status: "expired", rejection: "declined", attempt: "cy", created: NOW_S - 300 },
+    ];
+
+    expect(normalizeSourceRows(source, rows, NOW, 48).map(event => event.title)).toEqual([
+      "ada-new", "bob", "cy",
+    ]);
+  });
+
+  it("does not collapse non-matching rows or rows missing an identity field", () => {
+    const source = makeSource({
+      title: "{attempt}",
+      collapse: [{
+        by: ["user", "provider"],
+        withinMinutes: 30,
+        when: { field: "status", equals: "expired" },
+      }],
+    });
+    const rows = [
+      { user: "ada", provider: "stripe", status: "cancelled", attempt: "cancel-2", created: NOW_S - 60 },
+      { user: "ada", provider: "stripe", status: "cancelled", attempt: "cancel-1", created: NOW_S - 120 },
+      { provider: "stripe", status: "expired", attempt: "anonymous-2", created: NOW_S - 180 },
+      { provider: "stripe", status: "expired", attempt: "anonymous-1", created: NOW_S - 240 },
+    ];
+
+    expect(normalizeSourceRows(source, rows, NOW, 48).map(event => event.title)).toEqual([
+      "cancel-2", "cancel-1", "anonymous-2", "anonymous-1",
+    ]);
+  });
 });
 
 describe("row gates (require / exclude)", () => {
@@ -472,6 +519,16 @@ describe("parseConfig liveLog block", () => {
                 { when: { field: "status", equals: "trialing" }, label: "Trial" },
                 { when: [{ field: "x" }], label: "Never" },
               ],
+              collapse: [
+                {
+                  by: ["username", "provider", "username", ""],
+                  withinMinutes: 30,
+                  when: [{ field: "status", equals: "expired" }, { field: "failure", nonNull: true }],
+                },
+                { by: [], withinMinutes: 30 },
+                { by: ["username"], withinMinutes: -1 },
+                { by: ["username"], withinMinutes: 30, when: { field: "broken" } },
+              ],
               enrich: { api: "https://x/acct/${value}", key: "wallet", fields: { email: "data.email", bad: 7 }, ttlHours: 6, max: 10.9 },
             },
           ],
@@ -491,6 +548,11 @@ describe("parseConfig liveLog block", () => {
     ]);
     // A single condition object is normalized to an array.
     expect(source?.variants?.[1].when).toEqual([{ field: "status", equals: "trialing" }]);
+    expect(source?.collapse).toEqual([{
+      by: ["username", "provider"],
+      withinMinutes: 30,
+      when: [{ field: "status", equals: "expired" }, { field: "failure", nonNull: true }],
+    }]);
     expect(source?.enrich).toEqual({
       api: "https://x/acct/${value}",
       key: "wallet",

@@ -14,6 +14,7 @@ import type {
   LifeConfig,
   LiveLogAuthInput,
   LiveLogBadgeInput,
+  LiveLogCollapseInput,
   LiveLogCondition,
   LiveLogConfig,
   LiveLogDeriveInput,
@@ -373,6 +374,31 @@ function parseLiveLogSources(input: unknown): LiveLogSourceInput[] {
         return [variant];
       });
       if (variants.length > 0) source.variants = variants;
+    }
+    if (Array.isArray(o.collapse)) {
+      const collapse = o.collapse.flatMap((c): LiveLogCollapseInput[] => {
+        if (!c || typeof c !== "object" || Array.isArray(c)) return [];
+        const co = c as Record<string, unknown>;
+        if (!Array.isArray(co.by)) return [];
+        const by = [...new Set(
+          co.by.filter((field): field is string => typeof field === "string" && field.trim() !== "")
+            .map(field => field.trim())
+        )];
+        if (by.length === 0) return [];
+        if (typeof co.withinMinutes !== "number" || !Number.isFinite(co.withinMinutes) || co.withinMinutes <= 0) {
+          return [];
+        }
+        const rule: LiveLogCollapseInput = { by, withinMinutes: co.withinMinutes };
+        if (co.when !== undefined) {
+          const conditions = parseLiveLogConditions(co.when);
+          // A malformed conditional rule must not accidentally become an
+          // unconditional collapse.
+          if (conditions.length === 0) return [];
+          rule.when = conditions;
+        }
+        return [rule];
+      });
+      if (collapse.length > 0) source.collapse = collapse;
     }
     const require = parseLiveLogConditions(o.require);
     if (require.length > 0) source.require = require;
