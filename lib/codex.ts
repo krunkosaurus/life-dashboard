@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { recordFailure } from "./failures";
-import type { UsageFailure, UsageResult, UsageWindow } from "./types";
+import type { BankedReset, BankedResetSummary, UsageFailure, UsageResult, UsageWindow } from "./types";
 
 // Codex ≥ 0.135 no longer persists rate-limit events to ~/.codex/logs_2.sqlite.
 // The TUI fetches them live over the app-server JSON-RPC method
@@ -18,9 +18,23 @@ type RateLimitSnapshot = {
   secondary?: AppServerWindow | null;
 };
 
+type AppServerResetCredit = {
+  status?: string | null;
+  grantedAt?: number | null;
+  expiresAt?: number | null;
+  title?: string | null;
+  description?: string | null;
+};
+
+type AppServerResetCreditsSummary = {
+  availableCount?: number | null;
+  credits?: AppServerResetCredit[] | null;
+};
+
 type RateLimitsResult = {
   rateLimits?: RateLimitSnapshot | null;
   rateLimitsByLimitId?: Record<string, RateLimitSnapshot> | null;
+  rateLimitResetCredits?: AppServerResetCreditsSummary | null;
 };
 
 function windowLabel(durationMins: number | null | undefined, fallback: string): string {
@@ -59,10 +73,48 @@ function mapWindow(w: AppServerWindow | null | undefined, fallbackLabel: string)
   return win;
 }
 
+// `rateLimitResetCredits` is account-wide metadata returned alongside the
+// rolling windows. Keep only fields useful for display and omit the opaque
+// credit ID so the browser cannot accidentally turn this into a redemption UI.
+function mapBankedResets(
+  summary: AppServerResetCreditsSummary | null | undefined
+): BankedResetSummary | undefined {
+  if (
+    !summary
+    || typeof summary.availableCount !== "number"
+    || !Number.isSafeInteger(summary.availableCount)
+    || summary.availableCount < 0
+  ) {
+    return undefined;
+  }
+
+  if (!Array.isArray(summary.credits)) {
+    return { availableCount: summary.availableCount };
+  }
+
+  const resets = summary.credits.flatMap((credit): BankedReset[] => {
+    if (!credit || (credit.status != null && credit.status !== "available")) return [];
+    const reset: BankedReset = {};
+    if (typeof credit.title === "string" && credit.title.trim()) reset.title = credit.title;
+    if (typeof credit.description === "string" && credit.description.trim()) {
+      reset.description = credit.description;
+    }
+    if (typeof credit.grantedAt === "number" && Number.isFinite(credit.grantedAt)) {
+      reset.grantedAt = credit.grantedAt;
+    }
+    if (typeof credit.expiresAt === "number" && Number.isFinite(credit.expiresAt)) {
+      reset.expiresAt = credit.expiresAt;
+    }
+    return [reset];
+  });
+  return { availableCount: summary.availableCount, resets };
+}
+
 // Pure mapping from an `account/rateLimits/read` result onto UsageResult.
 // Exported for testing. `snapshotAt` is unix seconds.
 export function parseRateLimitsResult(result: unknown, snapshotAt: number): UsageResult {
   const response = result as RateLimitsResult | null;
+  const bankedResets = mapBankedResets(response?.rateLimitResetCredits);
   const candidates = [
     response?.rateLimits,
     response?.rateLimitsByLimitId?.codex,
@@ -79,7 +131,7 @@ export function parseRateLimitsResult(result: unknown, snapshotAt: number): Usag
     const secondary = mapWindow(rl.secondary, "weekly");
     const windows = [primary, secondary].filter((w): w is UsageWindow => w !== null);
     if (windows.length > 0) {
-      return { ok: true, snapshotAt, windows };
+      return { ok: true, snapshotAt, windows, ...(bankedResets ? { bankedResets } : {}) };
     }
   }
   return { ok: false, error: "rate-limit snapshot contains no usable windows" };
