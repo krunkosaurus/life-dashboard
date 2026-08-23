@@ -56,8 +56,22 @@ PORT=3100 npm run dev
 For production, build once and serve:
 ```bash
 npm run build
-npm start            # next start -H 127.0.0.1 (honors PORT)
+npm start            # binds 127.0.0.1 (honors PORT)
 ```
+
+### Reaching the dashboard from your other machines
+`npm start` binds loopback unless `HOST` says otherwise. Set `HOST=tailscale` to
+bind this machine's tailnet address instead, so any device on your tailnet can
+reach the dashboard — and nothing on the local LAN can:
+```bash
+HOST=tailscale PORT=3002 npm start
+# http://<this-machine>.<your-tailnet>.ts.net:3002
+```
+The address is resolved at startup from the machine's `100.64.0.0/10` interface,
+so it survives a Tailscale IP change. If Tailscale isn't connected yet the
+launcher waits up to 60s, then falls back to `127.0.0.1` rather than failing —
+restart once Tailscale is up. `HOST` also accepts a literal address if you want
+to pin one.
 
 ## Configuration
 
@@ -502,7 +516,10 @@ minimum 5).
 - **Events** come from `manualEvents`, `birthdays`, and/or `icsUrl`, all merged.
 
 ## Security
-The server binds to `127.0.0.1` only. `config.local.json`, `.env*.local`, and
+The server binds to `127.0.0.1` unless you set `HOST` (see "Reaching the
+dashboard from your other machines"). `HOST=tailscale` limits reachability to
+your tailnet; the dashboard has no login, so don't bind it to a LAN-visible or
+public address. `config.local.json`, `.env*.local`, and
 `.cache/` are gitignored because they can contain private calendar URLs, OAuth
 client secrets, user tokens, private admin API endpoints, and the live log's
 signing key or credentials. OAuth/bearer tokens never leave the server. If you
