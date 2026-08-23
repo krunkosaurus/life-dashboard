@@ -7,6 +7,21 @@ export type UsageWindow = {
   windowSecs?: number; // window duration in seconds; omitted when unknown
 };
 
+// Display-safe details for one banked Codex rate-limit reset. The app-server's
+// opaque redemption ID is intentionally not sent to the browser because this
+// dashboard only reports reset availability; it never consumes a reset.
+export type BankedReset = {
+  title?: string;
+  description?: string;
+  grantedAt?: number; // unix seconds
+  expiresAt?: number; // unix seconds; omitted when the reset does not expire
+};
+
+export type BankedResetSummary = {
+  availableCount: number;
+  resets?: BankedReset[]; // omitted when the backend returns only the count
+};
+
 // One entry in a usage source's recent-failure log. `at` is unix seconds of
 // the most recent occurrence; consecutive identical failures collapse into a
 // single entry with a bumped `count`.
@@ -17,7 +32,7 @@ export type UsageFailure = {
 };
 
 export type UsageResult =
-  | { ok: true; windows: UsageWindow[]; snapshotAt?: number; staleReason?: string; failures?: UsageFailure[] }
+  | { ok: true; windows: UsageWindow[]; bankedResets?: BankedResetSummary; snapshotAt?: number; staleReason?: string; failures?: UsageFailure[] }
   | { ok: false; error: string; failures?: UsageFailure[] };
 
 export type EventItem = {

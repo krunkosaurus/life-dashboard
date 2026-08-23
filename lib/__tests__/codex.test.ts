@@ -22,6 +22,67 @@ describe("parseRateLimitsResult", () => {
     expect(result.snapshotAt).toBe(1780135575);
   });
 
+  it("maps banked reset availability and display details", () => {
+    const result = parseRateLimitsResult(
+      {
+        ...liveResult,
+        rateLimitResetCredits: {
+          availableCount: 1,
+          credits: [
+            {
+              id: "opaque-secret-redemption-id",
+              resetType: "codexRateLimits",
+              status: "available",
+              grantedAt: 1787356783,
+              expiresAt: 1789948783,
+              title: "Full reset",
+              description: "One free rate limit reset.",
+            },
+          ],
+        },
+      },
+      1787443200
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.bankedResets).toEqual({
+      availableCount: 1,
+      resets: [
+        {
+          title: "Full reset",
+          description: "One free rate limit reset.",
+          grantedAt: 1787356783,
+          expiresAt: 1789948783,
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain("opaque-secret-redemption-id");
+  });
+
+  it("keeps an available reset count when detail rows are omitted", () => {
+    const result = parseRateLimitsResult(
+      {
+        ...liveResult,
+        rateLimitResetCredits: { availableCount: 2, credits: null },
+      },
+      0
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.bankedResets).toEqual({ availableCount: 2 });
+  });
+
+  it("omits a malformed banked reset summary without losing valid windows", () => {
+    const result = parseRateLimitsResult(
+      {
+        ...liveResult,
+        rateLimitResetCredits: { availableCount: -1, credits: [] },
+      },
+      0
+    );
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.bankedResets).toBeUndefined();
+    expect(result.windows).toHaveLength(2);
+  });
+
   it("returns ok:false when rateLimits is absent", () => {
     expect(parseRateLimitsResult({}, 0).ok).toBe(false);
     expect(parseRateLimitsResult(null, 0).ok).toBe(false);

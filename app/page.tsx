@@ -11,7 +11,7 @@ import { LiveLogPanel } from "@/components/LiveLogPanel";
 import { OuraPanel } from "@/components/OuraPanel";
 import { byPinnedThenMilestone, byPinnedThenSoonest, isAnniversaryEvent } from "@/lib/eventSort";
 import type { ChecklistResult } from "@/lib/checklists";
-import type { AnalyticsResult, EventItem, EventsResult, LifeConfig, LiveLogResult, OuraResult, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
+import type { AnalyticsResult, BankedResetSummary, EventItem, EventsResult, LifeConfig, LiveLogResult, OuraResult, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
 
 const DEFAULT_REFRESH_MS = 60_000;
 // Each event panel renders at most this many cards (a clean 3×3 grid). The
@@ -200,9 +200,57 @@ function UsagePanel({ title, data }: { title: string; data: UsageResult | null }
         {data.windows.map(w => (
           <LimitGauge key={w.label} label={w.label} usedPercent={w.usedPercent} resetAt={w.resetAt} windowSecs={w.windowSecs} stale={isStale} />
         ))}
+        {data.bankedResets && <BankedResets summary={data.bankedResets} stale={isStale} />}
       </div>
       <FailureLog failures={data.failures} />
     </Panel>
+  );
+}
+
+function BankedResets({ summary, stale }: { summary: BankedResetSummary; stale: boolean }) {
+  const details = summary.resets ?? [];
+  const noun = summary.availableCount === 1 ? "reset" : "resets";
+  return (
+    <div style={{ background: "#0c1015", border: "1px solid #1c222b", borderRadius: 8, padding: "9px 12px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, fontSize: 13 }}>
+        <span style={{ color: "#9aa6b8" }}>Banked resets</span>
+        <span>
+          <strong style={{ color: summary.availableCount > 0 ? "#7aa2f7" : undefined }}>
+            {summary.availableCount}
+          </strong>{" "}
+          {noun} available
+        </span>
+      </div>
+      {details.map((reset, index) => {
+        const remaining = reset.expiresAt == null
+          ? null
+          : Math.max(0, reset.expiresAt - Math.floor(Date.now() / 1000));
+        const expires = remaining == null
+          ? "does not expire"
+          : remaining === 0
+            ? "expired"
+            : `expires in ${formatAge(remaining)}`;
+        const tooltip = [
+          reset.description,
+          reset.expiresAt != null ? `Expires ${new Date(reset.expiresAt * 1000).toLocaleString()}` : null,
+        ].filter(Boolean).join(" · ");
+        return (
+          <div
+            key={`${reset.grantedAt ?? "reset"}-${index}`}
+            title={tooltip || undefined}
+            style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 6, fontSize: 11, color: "#7a8595" }}
+          >
+            <span>{reset.title || `Reset ${index + 1}`}</span>
+            <span style={{ whiteSpace: "nowrap" }}>{stale ? "expiration from stale snapshot" : expires}</span>
+          </div>
+        );
+      })}
+      {details.length < summary.availableCount && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "#7a8595" }}>
+          Details unavailable for {summary.availableCount - details.length} {summary.availableCount - details.length === 1 ? "reset" : "resets"}.
+        </div>
+      )}
+    </div>
   );
 }
 
