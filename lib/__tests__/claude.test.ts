@@ -19,7 +19,10 @@ import {
   orderRefreshCredentialTokens,
   persistDashboardOauth,
   credentialFingerprint,
+  mergeRefreshedCredential,
+  orderRefreshCandidates,
 } from "../claude";
+import { DEFAULT_CLAUDE_ACCOUNT } from "../claudeAccounts";
 
 const dashboardOauthTestFile = path.join(os.tmpdir(), `life-dashboard-oauth-test-${process.pid}.json`);
 
@@ -52,6 +55,7 @@ describe("normalizeClaudeUsage", () => {
       seven_day: { utilization: 0, resets_at: null },
     })).toEqual({
       ok: true,
+      bonusResets: { state: "unknown", reason: "not_reported" },
       windows: [
         { label: "5h", usedPercent: 0, windowSecs: 18000 },
         { label: "weekly", usedPercent: 0, windowSecs: 604800 },
@@ -96,6 +100,21 @@ describe("orderRefreshTokens", () => {
 
   it("handles a missing in-memory token", () => {
     expect(orderRefreshTokens(null, stored)).toEqual(["rs"]);
+  });
+
+  it("keeps each refresh token's own granted scopes", () => {
+    // A refresh can't widen a token's grant (400 invalid_scope, seen
+    // 2026-11-22 SGT), so a dashboard token granted fewer scopes than the
+    // Claude Code login must be refreshed with its own set, or the default
+    // set when its record predates stored scopes.
+    expect(orderRefreshCandidates([
+      { refreshToken: "keychain", expiresAt: 1000, scopes: ["a", "b", "c"] },
+      { refreshToken: "dashboard", expiresAt: 3000 },
+      { refreshToken: "keychain", expiresAt: 500, scopes: ["stale"] },
+    ])).toEqual([
+      { refreshToken: "dashboard" },
+      { refreshToken: "keychain", scopes: ["a", "b", "c"] },
+    ]);
   });
 
   it("orders and deduplicates every stored credential candidate", () => {
@@ -166,7 +185,7 @@ describe("refreshAccessToken", () => {
     ));
     vi.stubGlobal("fetch", fetchMock);
 
-    await refreshAccessToken("refresh-token-for-test");
+    await refreshAccessToken("refresh-token-for-test", DEFAULT_CLAUDE_ACCOUNT);
 
     expect(fetchMock).toHaveBeenCalledOnce();
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -177,6 +196,73 @@ describe("refreshAccessToken", () => {
       client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
       scope: "user:profile user:inference user:sessions:claude_code user:mcp_servers",
     });
+  });
+
+  it("sends no User-Agent, like Claude Code's own refresh", async () => {
+    // The token endpoint answers every request whose User-Agent is
+    // claude-code/<version> with 429 rate_limit_error, even a first attempt
+    // with a fake token (probed 2026-11-22 SGT). Claude Code's refresh leaves
+    // the User-Agent to its HTTP client, so the dashboard must not set one.
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: "invalid_grant" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await refreshAccessToken("refresh-token-for-test", DEFAULT_CLAUDE_ACCOUNT);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headerNames = Object.keys(init.headers as Record<string, string>).map((h) => h.toLowerCase());
+    expect(headerNames).not.toContain("user-agent");
+  });
+
+  it("requests the login's own scopes when they are known", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: "invalid_grant" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await refreshAccessToken("refresh-token-for-test", DEFAULT_CLAUDE_ACCOUNT, ["user:inference", "user:plugins"]);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).scope).toBe("user:inference user:plugins");
+  });
+});
+
+describe("mergeRefreshedCredential", () => {
+  const stored = {
+    accessToken: "old-access",
+    refreshToken: "old-refresh",
+    expiresAt: 1_000,
+    refreshTokenExpiresAt: 9_000,
+    scopes: ["user:inference", "user:plugins"],
+    subscriptionType: "max",
+  };
+  const refreshed = { accessToken: "new-access", refreshToken: "new-refresh", expiresAt: 2_000 };
+
+  it("replaces only the token fields and keeps everything else Claude Code stored", () => {
+    const merged = mergeRefreshedCredential(JSON.stringify({ claudeAiOauth: stored, other: 1 }), refreshed);
+    expect(JSON.parse(merged!)).toEqual({ claudeAiOauth: { ...stored, ...refreshed }, other: 1 });
+  });
+
+  it("records the granted scopes when the refresh reported them", () => {
+    const merged = mergeRefreshedCredential(
+      JSON.stringify({ claudeAiOauth: stored }),
+      { ...refreshed, scopes: ["user:inference"] },
+    );
+    expect(JSON.parse(merged!).claudeAiOauth.scopes).toEqual(["user:inference"]);
+  });
+
+  it("leaves a login Claude Code refreshed since alone", () => {
+    expect(mergeRefreshedCredential(JSON.stringify({ claudeAiOauth: { ...stored, expiresAt: 2_000 } }), refreshed)).toBe(null);
+    expect(mergeRefreshedCredential(JSON.stringify({ claudeAiOauth: { ...stored, expiresAt: 3_000 } }), refreshed)).toBe(null);
+  });
+
+  it("never writes over a record it cannot read", () => {
+    expect(mergeRefreshedCredential("not json", refreshed)).toBe(null);
+    expect(mergeRefreshedCredential(JSON.stringify({ somethingElse: {} }), refreshed)).toBe(null);
+    expect(mergeRefreshedCredential(JSON.stringify({ claudeAiOauth: { accessToken: "only" } }), refreshed)).toBe(null);
   });
 });
 
@@ -217,11 +303,13 @@ describe("automatic 401 recovery", () => {
     const recoverToken = vi.fn().mockResolvedValue({ token: "replacement-access-token" });
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await fetchUsageWithToken("rejected-access-token", true, recoverToken);
+    const result = await fetchUsageWithToken("rejected-access-token", true, DEFAULT_CLAUDE_ACCOUNT, recoverToken);
 
     expect(result.result.ok).toBe(true);
     expect(recoverToken).toHaveBeenCalledWith("rejected-access-token");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBeUndefined(); // GET, never a claim
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
       Authorization: "Bearer rejected-access-token",
     });
@@ -241,7 +329,7 @@ describe("automatic 401 recovery", () => {
     const recoverToken = vi.fn().mockResolvedValue({ token: "second-rejected-token" });
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await fetchUsageWithToken("first-rejected-token", true, recoverToken);
+    const result = await fetchUsageWithToken("first-rejected-token", true, DEFAULT_CLAUDE_ACCOUNT, recoverToken);
 
     expect(result).toMatchObject({
       result: { ok: false, error: expect.stringContaining("usage endpoint HTTP 401") },

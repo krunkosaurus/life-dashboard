@@ -9,6 +9,10 @@ describe("parseConfig", () => {
     expect(cfg.refreshSeconds).toBe(60);
   });
 
+  it("defaults to one Claude account on the default profile", () => {
+    expect(parseConfig({}, {}).claudeAccounts).toEqual([{ id: "default", label: "Claude Code" }]);
+  });
+
   it("reads icsUrl, pinnedEvents and refreshSeconds from the file", () => {
     const cfg = parseConfig(
       { icsUrl: "https://x/y.ics", pinnedEvents: ["A", "B"], refreshSeconds: 30 },
@@ -69,9 +73,9 @@ describe("parseConfig", () => {
     const cfg = parseConfig(
       {
         tailscaleHosts: [
-          { host: "pi-server", alias: "Garage" },
-          { host: " office.tailnet-example.ts.net ", alias: "  Office box " },
-          { host: "100.64.0.13" },
+          { host: "myserver", alias: "Garage" },
+          { host: " office.tailXXXXX.ts.net ", alias: "  Office box " },
+          { host: "100.64.0.1" },
           { host: "", alias: "empty" },   // empty host -> dropped
           { alias: "no-host" },           // missing host -> dropped
           "not-an-object",                // wrong type -> dropped
@@ -80,9 +84,9 @@ describe("parseConfig", () => {
       {}
     );
     expect(cfg.tailscaleHosts).toEqual([
-      { host: "pi-server", alias: "Garage" },
-      { host: "office.tailnet-example.ts.net", alias: "Office box" },
-      { host: "100.64.0.13" },
+      { host: "myserver", alias: "Garage" },
+      { host: "office.tailXXXXX.ts.net", alias: "Office box" },
+      { host: "100.64.0.1" },
     ]);
   });
 

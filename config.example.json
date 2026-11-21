@@ -17,11 +17,24 @@
   "pinnedEvents": ["Birthday", "Flight"],
   "refreshSeconds": 60,
   "life": { "birthDate": "1990-01-15", "expectancyYears": 80 },
+  "claudeAccounts": [],
+  "gpuHosts": [],
+  "workers": {
+    "historyUrl": "https://api.example.com/v1/analytics/chart/daily/events/query",
+    "poolUrl": "https://api.example.com/v1/leaderboard/subscription-workers",
+    "workers": []
+  },
   "tailscaleHosts": [
     { "host": "myserver", "alias": "Home server" },
     { "host": "mybox.tailXXXXX.ts.net", "alias": "Office box" },
     { "host": "100.64.0.1", "alias": "By IP" }
   ],
+  "climate": {
+    "hubUrl": "http://room-climate:8787",
+    "sensiboKeyFile": "~/.config/sensibo/credentials",
+    "timeZone": "Asia/Singapore",
+    "sensorLabels": {}
+  },
   "analytics": {
     "title": "Analytics",
     "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],

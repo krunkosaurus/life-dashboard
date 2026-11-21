@@ -1,5 +1,7 @@
 node_modules/
 .next/
+.next-preview/
+.next-gpu-preview/
 out/
 config.local.json
 .env*.local

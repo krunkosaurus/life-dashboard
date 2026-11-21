@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/Panel";
 import { LimitGauge } from "@/components/LimitGauge";
+import { ClaudeBonusResets } from "@/components/ClaudeBonusResets";
 import { CountdownCard } from "@/components/CountdownCard";
 import { AnniversaryCard } from "@/components/AnniversaryCard";
 import { LifeBar } from "@/components/LifeBar";
@@ -10,8 +11,9 @@ import { ChecklistPanel } from "@/components/ChecklistPanel";
 import { LiveLogPanel } from "@/components/LiveLogPanel";
 import { OuraPanel } from "@/components/OuraPanel";
 import { byPinnedThenMilestone, byPinnedThenSoonest, isAnniversaryEvent } from "@/lib/eventSort";
+import { applyClaudeAccountsResponse, replaceClaudeAccountUsage } from "@/lib/claudeUsageList";
 import type { ChecklistResult } from "@/lib/checklists";
-import type { AnalyticsResult, BankedResetSummary, EventItem, EventsResult, LifeConfig, LiveLogResult, OuraResult, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
+import type { AnalyticsResult, BankedResetSummary, ClaudeAccountUsage, ClaudeAccountsResult, EventItem, EventsResult, LifeConfig, LiveLogResult, OuraResult, ServersResult, ServerStatus, UsageFailure, UsageResult } from "@/lib/types";
 
 const DEFAULT_REFRESH_MS = 60_000;
 // Each event panel renders at most this many cards (a clean 3×3 grid). The
@@ -45,7 +47,10 @@ async function safeFetch<T>(url: string): Promise<T | { ok: false; error: string
 }
 
 export default function Page() {
-  const [claude, setClaude] = useState<UsageResult | null>(null);
+  // One entry per configured Claude account; null until the first response.
+  const [claude, setClaude] = useState<ClaudeAccountUsage[] | null>(null);
+  // Id of the account whose manual reset check is in flight.
+  const [claudeChecking, setClaudeChecking] = useState<string | null>(null);
   const [codex, setCodex]   = useState<UsageResult | null>(null);
   const [events, setEvents] = useState<EventsResult | null>(null);
   const [servers, setServers] = useState<ServersResult | null>(null);
@@ -60,6 +65,19 @@ export default function Page() {
   const [refreshMs, setRefreshMs] = useState(DEFAULT_REFRESH_MS);
   const [life, setLife] = useState<LifeConfig | null>(null);
   const ouraRequestSeq = useRef(0);
+  const claudeRequestSeq = useRef(0);
+
+  const checkClaudeReset = useCallback(async (accountId: string) => {
+    const request = ++claudeRequestSeq.current;
+    setClaudeChecking(accountId);
+    const result = await safeFetch<UsageResult>(
+      `/api/usage/claude?account=${encodeURIComponent(accountId)}&refresh=1`
+    );
+    if (request === claudeRequestSeq.current) {
+      setClaude(prev => replaceClaudeAccountUsage(prev, accountId, result));
+      setClaudeChecking(null);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     const analyticsUrl = analyticsWeekOffset === 0
@@ -69,8 +87,9 @@ export default function Page() {
       ? "/api/oura"
       : `/api/oura?dayOffset=${ouraDayOffset}`;
     const ouraRequest = ++ouraRequestSeq.current;
+    const claudeRequest = ++claudeRequestSeq.current;
     const [c, x, e, s, a, cl, ll, o] = await Promise.all([
-      safeFetch<UsageResult>("/api/usage/claude"),
+      safeFetch<ClaudeAccountsResult>("/api/usage/claude/accounts"),
       safeFetch<UsageResult>("/api/usage/codex"),
       safeFetch<EventsResult>("/api/events"),
       safeFetch<ServersResult>("/api/tailscale"),
@@ -79,7 +98,10 @@ export default function Page() {
       safeFetch<LiveLogResult>("/api/livelog"),
       safeFetch<OuraResult>(ouraUrl),
     ]);
-    setClaude(c as UsageResult);
+    if (claudeRequest === claudeRequestSeq.current) {
+      setClaude(prev => applyClaudeAccountsResponse(prev, c));
+      setClaudeChecking(null);
+    }
     setCodex(x as UsageResult);
     setEvents(e as EventsResult);
     setServers(s as ServersResult);
@@ -122,6 +144,8 @@ export default function Page() {
 
   const updatedAt =
     updated != null ? new Date(updated * 1000).toLocaleTimeString() : "—";
+  // Before the first response, show one Claude Code skeleton panel.
+  const claudePanels = claude ?? [{ id: "default", label: "Claude Code", usage: null }];
 
   return (
     <main style={{ padding: 24, display: "flex", flexDirection: "column", gap: 24, maxWidth: 1200, margin: "0 auto" }}>
@@ -144,8 +168,15 @@ export default function Page() {
         onDayOffsetChange={changeOuraDayOffset}
       />
 
-      <div className="grid grid-2">
-        <UsagePanel title="Claude Code" data={claude} />
+      <div className={`grid ${claudePanels.length > 1 ? "grid-usage" : "grid-2"}`}>
+        {claudePanels.map(account => (
+          <UsagePanel
+            key={account.id}
+            title={account.label}
+            data={account.usage}
+            resetControl={{ loading: claudeChecking === account.id, onCheck: () => checkClaudeReset(account.id) }}
+          />
+        ))}
         <UsagePanel title="Codex" data={codex} />
       </div>
 
@@ -166,7 +197,11 @@ export default function Page() {
   );
 }
 
-function UsagePanel({ title, data }: { title: string; data: UsageResult | null }) {
+function UsagePanel({ title, data, resetControl }: {
+  title: string;
+  data: UsageResult | null;
+  resetControl?: { loading: boolean; onCheck: () => void };
+}) {
   if (!data) return <Panel title={title}><GaugeSkeleton /></Panel>;
   if (!data.ok) {
     return (
@@ -202,6 +237,7 @@ function UsagePanel({ title, data }: { title: string; data: UsageResult | null }
         ))}
         {data.bankedResets && <BankedResets summary={data.bankedResets} stale={isStale} />}
       </div>
+      {resetControl && <ClaudeBonusResets status={data.bonusResets} stale={isStale || data.staleReason != null} {...resetControl} />}
       <FailureLog failures={data.failures} />
     </Panel>
   );

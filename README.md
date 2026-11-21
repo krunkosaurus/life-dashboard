@@ -28,6 +28,115 @@ Most settings read from `config.local.json`; OAuth integrations also use local
 environment variables and `.cache/` token files. Sections you don't configure are
 simply omitted.
 
+The **GPUs** tab takes an on-demand health snapshot of your configured machines.
+It shows per-GPU utilization, temperature, memory, power, driver version, CPU,
+available RAM, disks, cached OS updates, reboot requirements, and a bounded
+sample of system errors. Findings explain both the reading and what to review.
+Temperatures use Fahrenheit; timestamps use Pacific Time.
+
+Add hosts to the gitignored `config.local.json` using SSH aliases that already
+work from the dashboard machine:
+
+```json
+"gpuHosts": [
+  { "id": "gpu-one", "label": "GPU workstation", "group": "Workstations", "sshHost": "my-gpu", "platform": "linux" },
+  { "id": "gpu-two", "label": "Windows GPU", "group": "Workstations", "sshHost": "user@my-windows-gpu", "platform": "windows" }
+]
+```
+
+An optional `jumpHost` uses an existing SSH jump route. Linux hosts need Python 3;
+Windows hosts use PowerShell. NVIDIA readings require `nvidia-smi`. Configure SSH
+keys and verified host keys beforehand: checks are non-interactive, use strict
+host-key checking, and never forward your SSH agent. Private hostnames and
+addresses stay in local config; they are not returned by the GPU API.
+
+GPU checks run **only when opening the GPUs tab or pressing Refresh snapshot**.
+Navigation prefetch is disabled. There is no timer, cron, persistent SSH session,
+installed agent, or database. Concurrent visits share an in-progress check;
+at most four hosts are checked at once, with a 35-second timeout per host. A
+check already started finishes if its browser leaves. No GPU workloads are
+started or changed. The Overview retains its existing refresh behavior.
+
+OS updates are read from local APT lists or the offline Windows Update cache;
+the dashboard never refreshes repositories, downloads updates, or applies them.
+Cache age is shown. Driver versions describe installed drivers, not whether an
+online release is newer. Sparks' unavailable dedicated VRAM readings remain
+unknown; available system RAM describes their shared pool. WSL readings describe
+the Linux guest, and are labeled accordingly. Error logs are limited to the last
+30 kernel/Windows System errors within 24 hours; Linux failed systemd units are
+also checked. Sensor and permission gaps are shown explicitly.
+
+The **Workers** tab shows what your Sogni workers earn and whether any need a
+look. For each worker it reports today so far, yesterday, this month and last
+month as two figures: estimated payout (SOGNI credited for pay-as-you-go jobs,
+valued when earned, plus the worker's share of the month's Unlimited pool) and
+list value (the same jobs at the public job price). It charts the last 30 days,
+totals the last three months per Sogni account (several workers can earn under
+one account), and flags workers that are offline, stopped, unhealthy, recently
+restarted, failing jobs, or doing under half their usual work. Days are UTC
+days; clock times use the viewer's time zone.
+
+```json
+"workers": {
+  "historyUrl": "https://api.example.com/v1/analytics/chart/daily/events/query",
+  "poolUrl": "https://api.example.com/v1/leaderboard/subscription-workers",
+  "workers": [
+    { "id": "gpu-one", "label": "GPU workstation", "group": "Workstations", "account": "my-account", "nftTokenId": "123",
+      "checks": [{ "sshHost": "my-gpu", "container": "comfy-worker-0", "label": "Worker container" }] },
+    { "id": "mac", "label": "Mac", "group": "Mac", "account": "my-mac-account", "address": "0x0000000000000000000000000000000000000000", "network": "relaxed",
+      "checks": [{ "sshHost": "my-mac", "process": "Sogni", "label": "Sogni app" }] }
+  ]
+}
+```
+
+Earnings come from the network's public per-worker daily records and its public
+monthly pool board, so no login or API key is used. A worker is identified by
+its worker NFT number or, for a Mac, by wallet address and network. `account`
+names the Sogni account the worker earns under (defaults to the label).
+`checks` are optional: each names a Docker container or a process on a machine
+the dashboard can already reach over SSH, read with `docker inspect` or `pgrep`.
+A worker can list several, for example a model server on a second machine.
+
+Like the GPUs tab, the Workers tab works only on demand: it loads when opened or
+refreshed, shares an in-progress snapshot between visits, opens at most four SSH
+sessions at a time, and changes nothing on a worker. API reads are reused for
+one minute. The pool board's figure covers the whole month while the work covers
+only the days so far, so the month in progress is priced on the elapsed share of
+its pool; earlier months stay estimates until their pool is finalized.
+
+The **Locations** tab groups Sensibo and Aranet4 monitors by location. It shows
+current temperatures in Fahrenheit, humidity, measurement age, AC command state,
+Aranet CO₂ and battery where reported, and an interactive 24-hour temperature
+chart. New Sensibo devices appear automatically under their Sensibo location.
+Location cards and climate data are separate from the overview, so machine
+telemetry can be added to each location without restructuring the home page.
+
+To connect climate data, add `climate` to your gitignored `config.local.json`:
+
+```json
+"climate": {
+  "hubUrl": "http://room-climate:8787",
+  "sensiboKeyFile": "~/.config/sensibo/credentials",
+  "timeZone": "Asia/Singapore",
+  "sensorLabels": {}
+}
+```
+
+`hubUrl` points to the existing Room Climate logger's `/api/cards` service for
+Aranet readings and stored trends. `sensiboKeyFile` is a local file containing
+`SENSIBO_API_KEY=...`; the key is read only by the dashboard server and never
+returned to browsers. Sensibo supplies each device's location, current reading,
+AC state, and its available one-day history. A new device's chart starts with
+its first actual measurement. `sensorLabels` optionally maps a source ID to a
+friendlier area name. No credentials, sensor IDs, or private addresses belong
+in committed config.
+
+The page checks once per minute. Server-side reads are shared across browser
+tabs, and Sensibo history is fetched at most once per five minutes. Measurements
+older than 15 minutes are labeled stale. Provider failures are shown explicitly;
+previous readings retain their original timestamps and are labeled unavailable.
+This tab only reads sensors and AC settings; it does not send AC commands.
+
 ![Life Dashboard screenshot](docs/images/life-dashboard-demo.png)
 
 ## Requirements
@@ -96,9 +205,9 @@ variables. Every key is optional; omit a section to hide its panel.
   "refreshSeconds": 60,
   "life": { "birthDate": "1990-01-15", "expectancyYears": 80 },
   "tailscaleHosts": [
-    { "host": "pi-server", "alias": "Cold plunge" },
-    { "host": "office.tailnet-example.ts.net", "alias": "Office box" },
-    { "host": "100.64.0.13", "alias": "By IP" }
+    { "host": "myserver", "alias": "Cold plunge" },
+    { "host": "office.tailXXXXX.ts.net", "alias": "Office box" },
+    { "host": "100.64.0.1", "alias": "By IP" }
   ],
   "checklists": {
     "title": "Daily Checklists",
@@ -258,11 +367,51 @@ but no user token has been stored yet, the panel shows a connect link. Tokens
 created before the `heartrate` scope was requested must be reconnected before
 the sync estimate can be shown.
 
+### Claude accounts
+
+With no configuration the dashboard shows one **Claude Code** panel for the
+account Claude Code is logged into. To show several accounts (for example a
+work plan and a personal plan), give each one its own Claude Code profile and
+list them in **`claudeAccounts`**:
+
+```json
+"claudeAccounts": [
+  { "id": "work", "label": "Claude · work" },
+  { "id": "personal", "label": "Claude · personal", "configDir": "~/.claude-personal" }
+]
+```
+
+- Panels appear in the order listed.
+- `id` (letters, digits, `_`, `-`; unique) names the account in the API.
+  `label` is the panel title and defaults to the id.
+- `configDir` is the Claude Code profile folder the account is logged into.
+  Leave it out for the default profile (`~/.claude`). Two accounts cannot share
+  a profile.
+
+Log each extra account into its profile once:
+
+```bash
+CLAUDE_CONFIG_DIR=$HOME/.claude-personal claude
+# then run /login and sign in as that account
+```
+
+Use the same absolute path, with no trailing slash, in `CLAUDE_CONFIG_DIR` and
+in `configDir` (`~` in `configDir` expands to your home folder). Claude Code
+names that profile's Keychain item after the path, so a different spelling
+points the dashboard at an item that does not exist. Keep using that profile
+for the account from then on (an alias such as
+`alias claude-personal='CLAUDE_CONFIG_DIR=$HOME/.claude-personal claude'`
+helps); switching accounts with `/login` inside one profile replaces that
+profile's login.
+
+An account whose profile has no login shows "Unavailable" with a hint, and the
+server log names the Keychain item and credentials file it looked for.
+
 ### Servers (Tailscale)
 
 **`tailscaleHosts`** lists machines to monitor. Each is `{ "host": ..., "alias"?: ... }`
-where `host` is a bare hostname (`"pi-server"`), an FQDN
-(`"office.tailnet-example.ts.net"`), or a Tailscale IP (`"100.64.0.13"`); `alias` is
+where `host` is a bare hostname (`"myserver"`), an FQDN
+(`"office.tailXXXXX.ts.net"`), or a Tailscale IP (`"100.64.0.1"`); `alias` is
 the display name and falls back to `host`.
 
 Status is read from `tailscale status --json`, which reflects the **control
@@ -490,7 +639,17 @@ minimum 5).
   `~/.codex/logs_2.sqlite`, but Codex >= 0.135 stopped writing it.) Requires the
   `codex` binary on PATH; Codex can expose one or two windows, and the dashboard
   renders every usable one. If the call fails, the panel shows the error.
-- **Claude limits** are fetched from Anthropic's OAuth usage endpoint. Credential
+- **Claude limits** are fetched from Anthropic's OAuth usage endpoint, once per
+  account in `claudeAccounts` (see "Claude accounts"). Each account has its own
+  token, cache, backoff and failure log, so one account being rate limited or
+  logged out does not affect another. `/api/usage/claude` answers for the
+  default-profile account (the first account if none uses the default profile),
+  `/api/usage/claude?account=<id>` for a named one, and
+  `/api/usage/claude/accounts` for all of them. A non-default profile's
+  Keychain service is `Claude Code-credentials-<first 8 hex of sha256(configDir)>`
+  and its dashboard cache files carry the same suffix
+  (`.cache/claude-oauth-<suffix>.json`), so they follow the profile folder
+  rather than the account id. For the default profile, credential
   candidates come from the dashboard's private cache, the macOS login Keychain
   (service `Claude Code-credentials`, which Claude Code keeps current), and
   `~/.claude/.credentials.json`; whichever is freshest wins. The token never reaches
@@ -501,8 +660,23 @@ minimum 5).
   usage retry; repeated refresh rate limits progressively back off from 15 minutes to
   four hours. Concurrent dashboard requests share one refresh, and a rotated token is
   saved with `0600` permissions in the gitignored `.cache/claude-oauth.json` so recovery
-  survives dashboard restarts. Recent fetch failures are logged per source in a
+  survives dashboard restarts. Because a refresh revokes the previous refresh token,
+  the rotated login is also written back into that profile's existing Claude Code
+  Keychain item (only the token fields and granted scopes change, and only when
+  Claude Code hasn't refreshed since), so an idle CLI stays logged in. Each refresh
+  asks for the scopes its own stored record was granted: the endpoint refuses to widen
+  a grant (`invalid_scope`), and it answers a `claude-code/<version>` User-Agent on the
+  refresh call with 429, so that call sends none. Recent fetch failures are logged per source in a
   collapsible list under each gauge.
+- **Claude bonus resets** are queried alongside usage with Claude Code's read-only
+  `cedar_ember=1&skip_spend=1` query. The panel shows unused grants, the limits they
+  refill, and expiry dates in Pacific Time when Anthropic reports them. **Check
+  reset** requests an update (at most once per 15 seconds, honoring error backoff).
+  The entire bonus-reset section stays hidden when Anthropic restricts the offer
+  to the web/desktop, omits its status, or the latest query fails. It only appears
+  with confirmed reset data. **Open Claude Usage** links to Settings → Usage, where **Reset for free** verifies and redeems
+  the offer. The dashboard never consumes resets; failed reads do not reuse an old
+  reset count. See [Anthropic's limit-reset guide](https://support.claude.com/en/articles/17007452-what-is-a-limit-reset).
 - **Live log** events come from whatever JSON HTTP endpoints `liveLog` names in
   `config.local.json`, fetched server-side in parallel with a 10s timeout, cached
   per source for 60s, and merged into one feed. Auth (when configured) is a

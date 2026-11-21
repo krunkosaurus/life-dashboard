@@ -704,8 +704,9 @@ describe("getLiveLog (integration, stubbed fetch)", () => {
 
   function mockConfig(liveLog: LiveLogConfig | null) {
     vi.mocked(loadConfig).mockReturnValue({
+      claudeAccounts: [{ id: "default", label: "Claude Code" }],
       icsUrl: null, manualEvents: [], birthdays: [], pinnedEvents: [], refreshSeconds: 60,
-      life: null, tailscaleHosts: [], analytics: null, checklists: null, liveLog,
+      life: null, tailscaleHosts: [], gpuHosts: [], analytics: null, checklists: null, liveLog,
     });
   }
 

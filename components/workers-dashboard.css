@@ -1,0 +1,68 @@
+/* Workers tab. Layout, cards and tiles reuse gpu-dashboard.css; this file adds the earnings pieces. */
+/* Series colors were checked against the card surface for contrast and color-blind separation. */
+.workers-page { --w-pool: #3987e5; --w-direct: #c98500; --w-list: #9085e9; }
+.workers-seg-pool { background: var(--w-pool); }
+.workers-seg-direct { background: var(--w-direct); }
+.workers-seg-list { background: var(--w-list); }
+
+.workers-fleet-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; font-size: 11px; color: #8b98aa; }
+.workers-measure { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; font-size: 11px; color: #94a2b6; }
+.workers-panel { border: 1px solid var(--gpu-border); border-radius: 14px; background: #11161e; padding: 20px 22px; }
+.workers-panel > details { margin-top: 12px; }
+.workers-panel > details > summary { font-size: 11px; color: #bdc9d8; cursor: pointer; padding: 6px 0; }
+.workers-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font-size: 10px; color: #a7b1bf; }
+.workers-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 7px; vertical-align: -1px; }
+
+.workers-chart { margin-top: 40px; padding-left: 40px; }
+.workers-chart-plot { position: relative; height: 190px; border-bottom: 1px solid #2a3442; }
+.workers-chart-plot:focus-visible { outline: 2px solid #8edccc; outline-offset: 6px; }
+.workers-chart-grid { position: absolute; left: 0; right: 0; border-top: 1px solid #1d2531; }
+.workers-chart-grid > span { position: absolute; right: calc(100% + 8px); transform: translateY(-50%); font-size: 9px; color: #7e8da2; font-variant-numeric: tabular-nums; }
+.workers-chart-columns { position: absolute; inset: 0; display: flex; }
+.workers-chart-slot { flex: 1; min-width: 0; display: flex; align-items: flex-end; justify-content: center; padding: 0 1px; }
+.workers-chart-bar { width: 100%; max-width: 24px; display: flex; flex-direction: column; gap: 2px; }
+.workers-chart-bar > span { flex: 1 0 0; min-height: 1px; }
+.workers-chart-bar > span:first-child { border-radius: 4px 4px 0 0; }
+.workers-chart-slot[data-partial="true"] .workers-chart-bar { opacity: .5; }
+.workers-chart-slot[data-active="true"] { background: #ffffff0a; }
+.workers-chart-slot[data-active="true"] .workers-chart-bar { opacity: 1; filter: brightness(1.2); }
+.workers-chart-tip { position: absolute; bottom: calc(100% + 6px); transform: translateX(-50%); z-index: 2; pointer-events: none; min-width: 170px; display: grid; gap: 4px; padding: 9px 11px; border: 1px solid #2c3848; border-radius: 9px; background: #0b1018; box-shadow: 0 8px 22px #0008; font-size: 10px; color: #94a3b8; white-space: nowrap; }
+.workers-chart-tip strong { font-size: 15px; font-weight: 550; color: #e6ebf2; margin-right: 6px; }
+.workers-chart-tip b { font-weight: 500; color: #d5dde8; margin-right: 5px; font-variant-numeric: tabular-nums; }
+.workers-key { display: inline-block; width: 10px; height: 2px; border-radius: 1px; margin-right: 7px; vertical-align: middle; }
+.workers-chart-axis { position: relative; height: 22px; }
+.workers-chart-axis > span { position: absolute; top: 7px; transform: translateX(-50%); font-size: 9px; color: #7e8da2; white-space: nowrap; }
+.workers-chart-compact { margin-top: 8px; padding-left: 0; }
+.workers-chart-compact .workers-chart-plot { height: 46px; }
+.workers-mini { margin-bottom: 18px; }
+.workers-mini > span { font-size: 9px; color: #8d9baf; }
+
+.workers-earnings { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-variant-numeric: tabular-nums; }
+.workers-earnings th, .workers-earnings td { padding: 8px 0; border-bottom: 1px solid #222e3c; text-align: right; font-weight: 400; }
+.workers-earnings thead th { padding-top: 0; font-size: 9px; color: #8d9baf; }
+.workers-earnings tbody th { text-align: left; font-size: 11px; color: #96a4b8; }
+.workers-earnings td { font-size: 13px; color: #bdcce0; }
+.workers-earnings td:nth-child(2) { font-size: 17px; color: #e6ebf2; letter-spacing: -.3px; }
+
+.workers-table-wrap { overflow-x: auto; }
+.workers-table { width: 100%; border-collapse: collapse; font-size: 10px; font-variant-numeric: tabular-nums; }
+.workers-table th, .workers-table td { padding: 7px 0 7px 14px; border-bottom: 1px solid #25303e; text-align: right; white-space: nowrap; }
+.workers-table th:first-child, .workers-table td:first-child { padding-left: 0; text-align: left; }
+.workers-table th { font-weight: 400; color: #8697ad; }
+.workers-table td { color: #c0cede; }
+
+.workers-accounts { font-size: 11px; }
+.workers-accounts th, .workers-accounts td { padding: 10px 0 10px 18px; vertical-align: top; }
+.workers-accounts th small, .workers-accounts td small { display: block; margin-top: 3px; font-size: 9px; color: #7e8da2; white-space: normal; }
+.workers-accounts tbody th strong { font-weight: 500; color: #d5dde8; }
+.workers-accounts td strong { font-size: 15px; font-weight: 500; color: #e6ebf2; letter-spacing: -.2px; }
+.workers-accounts tbody th small { max-width: 220px; }
+.workers-accounts tfoot th, .workers-accounts tfoot td { border-bottom: 0; border-top: 1px solid #34404f; }
+.workers-accounts tfoot th { color: #bdc9d8; }
+.workers-note { margin: 12px 0 0; font-size: 10px; line-height: 1.5; color: #8b98aa; }
+
+@media (max-width: 640px) {
+  .workers-panel { padding: 16px; }
+  .workers-panel .workers-chart { padding-left: 34px; }
+  .workers-panel .workers-chart-plot { height: 160px; }
+}

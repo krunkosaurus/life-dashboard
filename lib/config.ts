@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseChecklists } from "./checklists";
+import { parseClaudeAccounts } from "./claudeAccounts";
+import { parseClimateConfig } from "./climateConfig";
+import { parseGpuHosts } from "./gpuConfig";
+import { parseWorkersConfig } from "./workerConfig";
 import type {
   AnalyticsChartInput,
   AnalyticsChartLayout,
@@ -511,7 +515,7 @@ export function parseConfig(
   const checklists = parseChecklists(file.checklists);
   const liveLog = parseLiveLog(file.liveLog);
 
-  return { icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life, tailscaleHosts, analytics, checklists, liveLog };
+  return { claudeAccounts: parseClaudeAccounts(file.claudeAccounts), icsUrl, manualEvents, birthdays, pinnedEvents, refreshSeconds, life, tailscaleHosts, gpuHosts: parseGpuHosts(file.gpuHosts), workers: parseWorkersConfig(file.workers), analytics, checklists, liveLog, climate: parseClimateConfig(file.climate) };
 }
 
 export function loadConfig(): AppConfig {

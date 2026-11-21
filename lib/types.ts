@@ -22,6 +22,23 @@ export type BankedResetSummary = {
   resets?: BankedReset[]; // omitted when the backend returns only the count
 };
 
+// Claude's optional bonus reset is separate from the scheduled quota reset.
+// An unsupported CLI surface must never be interpreted as zero account resets.
+export type ClaudeBonusResetGrant = {
+  title: string;
+  remaining: number;
+  expiresAt?: number;
+  startsAt?: number;
+  paused: boolean;
+  usableNow: boolean;
+  requiresLimit: boolean;
+  limits: string[];
+};
+
+export type ClaudeBonusResets =
+  | { state: "known"; grants: ClaudeBonusResetGrant[]; cooldownUntil?: number }
+  | { state: "unknown"; reason: "surface" | "not_reported" | "unavailable" };
+
 // One entry in a usage source's recent-failure log. `at` is unix seconds of
 // the most recent occurrence; consecutive identical failures collapse into a
 // single entry with a bumped `count`.
@@ -32,8 +49,14 @@ export type UsageFailure = {
 };
 
 export type UsageResult =
-  | { ok: true; windows: UsageWindow[]; bankedResets?: BankedResetSummary; snapshotAt?: number; staleReason?: string; failures?: UsageFailure[] }
+  | { ok: true; windows: UsageWindow[]; bankedResets?: BankedResetSummary; bonusResets?: ClaudeBonusResets; snapshotAt?: number; staleReason?: string; failures?: UsageFailure[] }
   | { ok: false; error: string; failures?: UsageFailure[] };
+
+// One configured Claude account's usage, as sent to the browser. Only the id
+// and label identify it; the profile folder and credentials stay server-side.
+export type ClaudeAccountUsage = { id: string; label: string; usage: UsageResult };
+
+export type ClaudeAccountsResult = { accounts: ClaudeAccountUsage[] };
 
 export type EventItem = {
   title: string;
@@ -394,6 +417,8 @@ export type LiveLogResult =
   | { ok: false; error: string; hidden?: boolean; failures?: UsageFailure[] };
 
 export type AppConfig = {
+  claudeAccounts: import("./claudeAccounts").ClaudeAccount[]; // never empty
+  climate?: import("./climateTypes").ClimateConfig | null;
   icsUrl: string | null;
   manualEvents: ManualEventInput[];
   birthdays: BirthdayInput[];
@@ -401,6 +426,8 @@ export type AppConfig = {
   refreshSeconds: number;
   life: LifeConfig | null;
   tailscaleHosts: TailscaleHostInput[];
+  gpuHosts: import("./gpuTypes").GpuHostConfig[];
+  workers?: import("./workerTypes").WorkersConfig | null;
   analytics: AnalyticsConfig | null; // parsed template; resolved by getAnalytics
   checklists: ChecklistConfig | null; // parsed template; resolved by resolveChecklist
   liveLog: LiveLogConfig | null;      // parsed template; resolved by getLiveLog
