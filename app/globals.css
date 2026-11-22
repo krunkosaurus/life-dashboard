@@ -23,65 +23,60 @@ html, body { margin: 0; padding: 0; background: #0b0d10; color: #e6e9ef; font-fa
 .dashboard-tab:hover { color: #e6e9ef; background: #11151b; }
 .dashboard-tab[aria-current="page"] { color: #c3d5ff; background: #142035; border-color: #253753; }
 .dashboard-tab:focus-visible, .locations-refresh-button:focus-visible { outline: 2px solid #7aa2f7; outline-offset: 3px; }
-.locations-page { box-sizing: border-box; padding: 32px 24px; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 25px; }
-.locations-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.climate-eyebrow { color: #8390a5; font-size: 10px; font-weight: 650; letter-spacing: 1.6px; margin: 0 0 10px; }
-.locations-header h1 { font-size: clamp(23px, 3vw, 32px); font-weight: 550; letter-spacing: -.9px; margin: 0; }
-.locations-description { font-size: 13px; color: #8e9aad; margin: 10px 0 0; line-height: 1.6; }
-.locations-refresh { display: flex; gap: 12px; align-items: center; font-size: 11px; color: #7f8ba0; white-space: nowrap; }
-.locations-refresh-button { font: inherit; font-size: 12px; color: #b7c9e9; background: #141c28; border: 1px solid #2a374b; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
-.locations-refresh-button:hover { background: #1a2638; }
-.locations-refresh-button:disabled { opacity: .5; cursor: default; }
-.climate-overview { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; font-size: 12px; color: #8996a9; border-top: 1px solid #1c2430; border-bottom: 1px solid #1c2430; padding: 15px 0; }
-.climate-overview > span { display: inline-flex; align-items: center; gap: 5px; }
-.climate-overview strong { color: #d8e0ec; font-weight: 550; }
-.climate-overview-zone { margin-left: auto; font-size: 11px; }
-.climate-overview-dot { width: 6px; height: 6px; border-radius: 50%; background: #6acbb3; margin-right: 3px; }
-.climate-locations-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items: start; }
-.climate-location { min-width: 0; background: #11151b; border: 1px solid #222c3a; border-radius: 14px; padding: 22px; overflow: hidden; }
-.climate-location-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 20px; }
-.climate-location-header .climate-eyebrow { display: block; margin-bottom: 7px; font-size: 9px; }
-.climate-location-header h2 { font-size: 21px; font-weight: 550; letter-spacing: -.45px; margin: 0; }
-.climate-location-count { font-size: 10px; color: #a3afc2; background: #19212e; border: 1px solid #293447; padding: 5px 8px; border-radius: 20px; white-space: nowrap; }
-.climate-sensors { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 12px; }
-.climate-sensor { min-width: 0; border: 1px solid #242e3d; border-top-color: #42618b; background: #0d121a; border-radius: 10px; padding: 14px; }
-.climate-sensor-aranet4 { border-top-color: #85643b; }
-.climate-sensor-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
-.climate-device-label { font-size: 10px; font-weight: 600; color: #9db9e8; }
-.climate-sensor-aranet4 .climate-device-label { color: #d5b17d; }
-.climate-status { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; color: #88afab; }
-.climate-status i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
-.climate-status-stale, .climate-status-offline, .climate-status-unavailable { color: #e0af68; }
-.climate-sensor h3 { min-height: 32px; margin: 10px 0 5px; color: #a0adbf; font-size: 11px; font-weight: 400; line-height: 1.5; }
-.climate-temperature { font-size: clamp(33px, 4vw, 44px); font-variant-numeric: tabular-nums; font-weight: 450; letter-spacing: -2px; color: #ecf2fb; line-height: 1.2; }
-.climate-temperature span { color: #8191aa; font-size: 20px; letter-spacing: -.6px; margin-left: 4px; }
-.climate-temperature-muted { color: #9b8b74; }
-.climate-reading-age { min-height: 32px; font-size: 10px; color: #7c8aa1; margin: 7px 0 12px; line-height: 1.6; }
-.climate-reading-age > span { display: block; color: #91a2bd; }
-.climate-sensor-metrics { display: flex; flex-wrap: wrap; gap: 12px 16px; padding-top: 11px; margin: 0; border-top: 1px solid #202938; }
-.climate-sensor-metrics dt { font-size: 9px; color: #7d8ba2; margin-bottom: 4px; }
-.climate-sensor-metrics dd { font-size: 12px; font-variant-numeric: tabular-nums; color: #c9d5e5; margin: 0; }
-.climate-sensor-metrics dd span { font-size: 9px; color: #7d8ba2; }
-.climate-ac-state { border-top: 1px solid #202938; margin-top: 12px; padding-top: 11px; display: flex; gap: 5px; align-items: center; flex-wrap: wrap; font-size: 10px; color: #8292aa; line-height: 1.6; }
-.climate-ac-state strong { color: #b7c4d8; font-size: 10px; font-weight: 500; }
-.climate-ac-indicator { width: 5px; height: 5px; border-radius: 50%; background: #667084; }
-.climate-ac-indicator.is-on { background: #7aa2f7; }
-.climate-ac-state > span:last-child { flex-basis: 100%; }
-.climate-sensor-error { color: #d3a363; font-size: 10px; line-height: 1.5; margin: 10px 0 0; }
-.climate-chart { margin-top: 23px; padding-top: 17px; border-top: 1px solid #252e3b; }
-.climate-chart-heading { display: flex; justify-content: space-between; color: #99a7bc; font-size: 10px; margin-bottom: 8px; }
-.climate-chart-heading > span:last-child { color: #6e7d94; }
+.locations-page { box-sizing: border-box; padding: 32px 24px; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+.locations-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
+.locations-header h1 { font-size: clamp(28px, 4vw, 38px); font-weight: 550; letter-spacing: -1.3px; margin: 0 0 8px; }
+.locations-header p { font-size: 13px; color: #91a0b4; margin: 0; line-height: 1.6; }
+.locations-refresh { display: flex; gap: 12px; align-items: center; font-size: 12px; color: #8391a5; white-space: nowrap; }
+.locations-refresh-button { font: inherit; font-size: 12px; color: #c3d5ff; background: #142035; border: 1px solid #253753; padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+.locations-refresh-button:hover { background: #1a2943; }
+.locations-refresh-button:disabled { opacity: .55; cursor: default; }
+.climate-locations-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.climate-location { min-width: 0; background: #11151b; border: 1px solid #222c3a; border-radius: 14px; padding: 22px; }
+.climate-location-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.climate-location-header h2 { font-size: 20px; font-weight: 600; letter-spacing: -.3px; margin: 0; }
+.climate-location-warning { font-size: 12px; color: #e0af68; }
+/* Cards share row tracks (header, reading, metrics, AC) so a two-line room name
+   in one card doesn't push its temperature below its neighbour's. */
+.climate-sensors { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; }
+.climate-sensor { min-width: 0; display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 0; align-content: start; background: #0d121a; border: 1px solid #232c3a; border-radius: 10px; padding: 16px; }
+.climate-sensor h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; line-height: 1.35; color: #e6e9ef; }
+.climate-swatch { flex: none; width: 14px; height: 3px; border-radius: 2px; }
+.climate-sensor-meta { margin: 3px 0 0 22px; font-size: 12px; line-height: 1.5; color: #8391a5; }
+.climate-sensor-meta.is-warn { color: #e0af68; }
+.climate-reading { margin-top: 14px; }
+.climate-temperature { font-size: clamp(36px, 4vw, 44px); font-variant-numeric: tabular-nums; font-weight: 450; letter-spacing: -1.6px; line-height: 1.1; color: #eef2f8; }
+.climate-temperature span { color: #8391a5; font-size: 18px; letter-spacing: -.3px; margin-left: 3px; }
+.climate-temperature.is-muted { color: #8c96a6; }
+.climate-trend { margin: 4px 0 0; font-size: 12px; color: #a2afc1; }
+.climate-sensor-metrics { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 10px 22px; margin: 14px 0 0; padding-top: 12px; border-top: 1px solid #1f2834; }
+.climate-sensor-metrics dt { font-size: 11px; color: #8391a5; margin-bottom: 2px; }
+.climate-sensor-metrics dd { font-size: 14px; font-variant-numeric: tabular-nums; color: #d5dde8; margin: 0; }
+.climate-sensor-metrics dd span { font-size: 11px; color: #8391a5; }
+.climate-nowrap { white-space: nowrap; }
+.climate-ac { margin-top: 12px; padding-top: 12px; border-top: 1px solid #1f2834; font-size: 12px; line-height: 1.5; color: #a2afc1; }
+.climate-ac p { margin: 0; }
+.climate-ac strong { color: #e6e9ef; font-weight: 600; }
+.climate-ac-dot { display: inline-block; box-sizing: border-box; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; border: 1.5px solid #66717f; vertical-align: 0; }
+.climate-ac-dot.is-on { background: #9fd8ff; border-color: #9fd8ff; }
+.climate-ac .climate-ac-rule { margin-top: 3px; color: #8391a5; }
+.climate-sensor-error { color: #e0af68; font-size: 12px; line-height: 1.5; margin: 10px 0 0; }
+.climate-chart { margin-top: 22px; }
+.climate-chart-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 6px; }
+.climate-chart-heading h3 { margin: 0; font-size: 13px; font-weight: 600; color: #c9d3e1; }
+.climate-chart-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: #a2afc1; }
+.climate-chart-legend li { display: inline-flex; align-items: center; gap: 7px; }
+.climate-chart-legend i, .climate-chart-tooltip i { display: inline-block; flex: none; width: 14px; height: 3px; border-radius: 2px; }
 .climate-chart-plot { position: relative; }
 .climate-chart-plot svg { width: 100%; display: block; overflow: visible; cursor: crosshair; }
-.climate-chart-tooltip { position: absolute; top: 6px; right: 10px; z-index: 2; pointer-events: none; border: 1px solid #34435a; background: #0c111a; box-shadow: 0 6px 22px #0006; padding: 9px 12px; border-radius: 8px; color: #aab7cc; font-size: 10px; }
-.climate-chart-tooltip > span { display: block; color: #7f91ac; font-size: 9px; margin-bottom: 6px; }
-.climate-chart-tooltip > div { display: flex; align-items: center; gap: 6px; line-height: 1.8; }
-.climate-chart-tooltip strong { margin-left: 12px; color: #e6edf8; font-weight: 550; }
-.climate-chart-tooltip i, .climate-chart-legend i { display: inline-block; width: 7px; height: 2px; border-radius: 1px; }
-.climate-chart-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 9px; color: #8b9bb3; }
-.climate-chart-legend > span { display: inline-flex; gap: 6px; align-items: center; }
-.climate-chart-empty { color: #7d8ba2; font-size: 12px; padding: 30px 0; text-align: center; }
-.locations-footer { color: #6d7b91; font-size: 11px; line-height: 1.7; }
+.climate-chart-axis { fill: #7d8a9e; font-size: 11px; font-variant-numeric: tabular-nums; }
+.climate-chart-end-label { fill: #c9d3e1; font-size: 11px; font-weight: 500; }
+.climate-chart-tooltip { position: absolute; top: 4px; z-index: 2; pointer-events: none; min-width: 190px; border: 1px solid #34435a; background: #0c111a; box-shadow: 0 6px 22px #0006; padding: 9px 12px; border-radius: 8px; color: #a2afc1; font-size: 12px; }
+.climate-chart-tooltip > span { display: block; color: #8391a5; font-size: 11px; margin-bottom: 5px; }
+.climate-chart-tooltip > div { display: flex; align-items: center; gap: 7px; line-height: 1.8; white-space: nowrap; }
+.climate-chart-tooltip strong { margin-left: auto; padding-left: 14px; color: #eef2f8; font-weight: 600; font-variant-numeric: tabular-nums; }
+.climate-chart-empty { color: #8391a5; font-size: 12px; padding: 28px 0; margin: 0; text-align: center; }
+.locations-footer { color: #7d8a9e; font-size: 12px; line-height: 1.7; }
 .climate-alert { color: #e5ba7d; font-size: 12px; background: #241d14; border: 1px solid #51402a; border-radius: 10px; padding: 12px 16px; }
 .climate-alert p { margin: 3px 0; }
 .climate-empty { padding: 32px; text-align: center; border: 1px dashed #2d3a4e; border-radius: 12px; color: #8a9bb5; font-size: 13px; }
@@ -96,12 +91,8 @@ html, body { margin: 0; padding: 0; background: #0b0d10; color: #e6e9ef; font-fa
 @media (max-width: 540px) {
   .dashboard-nav { padding: 14px 16px 0; }
   .locations-page { padding: 25px 16px; gap: 20px; }
-  .locations-header { align-items: flex-start; flex-direction: column; }
+  .locations-header { align-items: flex-start; flex-direction: column; gap: 14px; }
   .locations-refresh { width: 100%; justify-content: space-between; }
-  .climate-overview { gap: 13px; }
-  .climate-overview-zone { margin-left: 0; flex-basis: 100%; }
   .climate-location { padding: 16px; }
   .climate-sensors { grid-template-columns: 1fr; }
-  .climate-sensor h3 { min-height: 0; }
-  .climate-temperature { font-size: 43px; }
 }

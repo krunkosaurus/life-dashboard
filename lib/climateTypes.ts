@@ -22,7 +22,11 @@ export type ClimateSensor = {
   error: string | null;
   historyError: string | null;
   history: ClimatePoint[];
-  ac: { on: boolean; mode: string; targetF: number | null; fan: string } | null;
+  ac: {
+    on: boolean; mode: string; targetF: number | null; fan: string;
+    // Sensibo's automatic on/off rule ("Climate React"), when it is enabled.
+    climateReact: { aboveF: number; aboveOn: boolean; belowF: number; belowOn: boolean } | null;
+  } | null;
 };
 
 export type ClimateLocation = { id: string; name: string; sensors: ClimateSensor[] };

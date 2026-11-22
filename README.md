@@ -104,10 +104,14 @@ one minute. The pool board's figure covers the whole month while the work covers
 only the days so far, so the month in progress is priced on the elapsed share of
 its pool; earlier months stay estimates until their pool is finalized.
 
-The **Locations** tab groups Sensibo and Aranet4 monitors by location. It shows
-current temperatures in Fahrenheit, humidity, measurement age, AC command state,
-Aranet CO₂ and battery where reported, and an interactive 24-hour temperature
-chart. New Sensibo devices appear automatically under their Sensibo location.
+The **Locations** tab groups Sensibo and Aranet4 monitors by location. Each card
+is named after the room it measures and shows the current temperature in
+Fahrenheit, humidity, measurement age, Aranet CO₂ and battery where reported, and
+the AC's state. When Sensibo Climate React is on, the card states its rule (for
+example, on above 90°F and off below 79°F), so a warm room with the AC off reads
+as expected rather than broken. Below the cards, an interactive 24-hour chart
+draws one line per room in the same color as that room's card, labelled by room
+name. New Sensibo devices appear automatically under their Sensibo location.
 Location cards and climate data are separate from the overview, so machine
 telemetry can be added to each location without restructuring the home page.
 
@@ -127,8 +131,10 @@ Aranet readings and stored trends. `sensiboKeyFile` is a local file containing
 `SENSIBO_API_KEY=...`; the key is read only by the dashboard server and never
 returned to browsers. Sensibo supplies each device's location, current reading,
 AC state, and its available one-day history. A new device's chart starts with
-its first actual measurement. `sensorLabels` optionally maps a source ID to a
-friendlier area name. No credentials, sensor IDs, or private addresses belong
+its first actual measurement. `sensorLabels` optionally maps a source ID
+(`sensibo-<device id in lowercase>` or the Aranet card ID) to the room name shown
+on the card and chart, such as `"sensibo-abc123": "Server room"`; without one,
+the Sensibo room name is used. No credentials, sensor IDs, or private addresses belong
 in committed config.
 
 The page checks once per minute. Server-side reads are shared across browser

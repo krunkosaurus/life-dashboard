@@ -27,7 +27,21 @@ type SensiboPod = {
   measurements: { time?: { time: string }; temperature: number | null; humidity: number | null };
   connectionStatus: { isAlive: boolean };
   acState: { on: boolean; mode: string; targetTemperature?: number; temperatureUnit?: string; fanLevel: string };
+  smartMode?: {
+    enabled: boolean;
+    lowTemperatureThreshold?: number | null; highTemperatureThreshold?: number | null;
+    lowTemperatureState?: { on: boolean } | null; highTemperatureState?: { on: boolean } | null;
+  } | null;
 };
+
+// Sensibo stores Climate React thresholds in Celsius regardless of the AC's unit.
+function climateReact(rule: SensiboPod["smartMode"]): NonNullable<ClimateSensor["ac"]>["climateReact"] {
+  if (!rule?.enabled || rule.highTemperatureThreshold == null || rule.lowTemperatureThreshold == null) return null;
+  return {
+    aboveF: Math.round(celsiusToFahrenheit(rule.highTemperatureThreshold)!), aboveOn: rule.highTemperatureState?.on ?? true,
+    belowF: Math.round(celsiusToFahrenheit(rule.lowTemperatureThreshold)!), belowOn: rule.lowTemperatureState?.on ?? false,
+  };
+}
 
 export function aranetSensors(cards: HubCard[], labels: Record<string, string>): ClimateSensor[] {
   return cards.filter(card => card.kind === "aranet4").map(card => ({
@@ -54,7 +68,8 @@ export function sensiboSensor(pod: SensiboPod, labels: Record<string, string>): 
   const id = `sensibo-${pod.id.toLowerCase()}`;
   const target = pod.acState.targetTemperature;
   return {
-    id, kind: "sensibo", label: "Sensibo Sky", area: labels[id] ?? pod.room.name,
+    id, kind: "sensibo", label: "Sensibo Sky",
+    area: labels[id] ?? pod.room.name.charAt(0).toUpperCase() + pod.room.name.slice(1),
     location: pod.location.name,
     measuredAt: pod.measurements.time ? Date.parse(pod.measurements.time.time) / 1000 : null,
     temperatureF: celsiusToFahrenheit(pod.measurements.temperature),
@@ -64,7 +79,7 @@ export function sensiboSensor(pod: SensiboPod, labels: Record<string, string>): 
     error: null, historyError: null, history: [],
     ac: { on: pod.acState.on, mode: pod.acState.mode,
       targetF: target == null ? null : pod.acState.temperatureUnit === "F" ? target : celsiusToFahrenheit(target),
-      fan: pod.acState.fanLevel },
+      fan: pod.acState.fanLevel, climateReact: climateReact(pod.smartMode) },
   };
 }
 
@@ -101,7 +116,7 @@ export function createClimateReader(fetcher: typeof fetch = fetch, keyReader = r
     catch { throw new Error("Sensibo credentials could not be read."); }
     const deviceUrl = new URL(`${SENSIBO_API}/users/me/pods`);
     deviceUrl.searchParams.set("apiKey", key);
-    deviceUrl.searchParams.set("fields", "id,room,location,measurements,acState,connectionStatus");
+    deviceUrl.searchParams.set("fields", "id,room,location,measurements,acState,connectionStatus,smartMode");
     const payload = await json(deviceUrl.toString(), "Sensibo") as { status: string; result: SensiboPod[] };
     if (payload.status !== "success" || !Array.isArray(payload.result)) throw new Error("Sensibo did not return its device list.");
     return Promise.all(payload.result.map(async pod => {

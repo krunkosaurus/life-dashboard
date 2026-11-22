@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createClimateReader, sensiboSensor } from "../climate";
 import { parseClimateConfig } from "../climateConfig";
 import { celsiusToFahrenheit, sensorStatus } from "../climateTypes";
+import { endLabelOffsets, temperatureTicks } from "../climateChart";
 
 const epoch = Date.parse("2026-10-23T06:00:00Z");
 const config = parseClimateConfig({ hubUrl: "http://room-logger:8787", timeZone: "Asia/Singapore" })!;
@@ -50,6 +51,44 @@ describe("location climate readings", () => {
     expect(west.ac).toMatchObject({ on: false, targetF: 75.2 });
     expect(west.history).toHaveLength(2);
     expect(JSON.stringify(result)).not.toMatch(/test-api-key|private-address|latLon|apiKey/);
+  });
+
+  it("asks Sensibo for Climate React settings in the same device-list request", async () => {
+    const { fetcher, mock } = provider();
+    await createClimateReader(fetcher, () => "test-api-key", () => epoch)(config);
+    const list = mock.mock.calls.map(([url]) => new URL(String(url))).find(url => url.pathname.endsWith("/users/me/pods"))!;
+    expect(list.searchParams.get("fields")?.split(",")).toContain("smartMode");
+  });
+
+  it("explains an enabled Climate React rule in Fahrenheit and ignores a disabled one", () => {
+    const rule = {
+      enabled: true, type: "temperature", lowTemperatureThreshold: 26.11111111111111, highTemperatureThreshold: 32.22222222222222,
+      lowTemperatureState: { on: false }, highTemperatureState: { on: true },
+    };
+    const sensor = sensiboSensor({ ...pod("device", "Site"), smartMode: rule }, {});
+    expect(sensor.ac?.climateReact).toEqual({ aboveF: 90, aboveOn: true, belowF: 79, belowOn: false });
+    expect(sensiboSensor({ ...pod("device", "Site"), smartMode: { ...rule, enabled: false } }, {}).ac?.climateReact).toBeNull();
+    expect(sensiboSensor({ ...pod("device", "Site"), smartMode: null }, {}).ac?.climateReact).toBeNull();
+  });
+
+  it("names a Sensibo by its configured label, else its capitalized Sensibo room name", () => {
+    const bedroom = { ...pod("Bed", "Site"), room: { name: "bedroom" } };
+    expect(sensiboSensor(bedroom, {}).area).toBe("Bedroom");
+    expect(sensiboSensor(bedroom, { "sensibo-bed": "Guest room" }).area).toBe("Guest room");
+  });
+
+  it("puts temperature gridlines on round, evenly spaced degrees", () => {
+    expect(temperatureTicks(73.5, 81)).toEqual([72, 74, 76, 78, 80, 82]);
+    expect(temperatureTicks(74.8, 88.5)).toEqual([70, 75, 80, 85, 90]);
+    expect(temperatureTicks(73.76, 73.9)).toEqual([72, 73, 74, 75]);
+  });
+
+  it("keeps line-end labels apart: the top line labelled above, the rest below", () => {
+    expect(endLabelOffsets([100, 40])).toEqual([16, -8]);
+    expect(endLabelOffsets([50, 52])).toEqual([-8, 16]);
+    const close = endLabelOffsets([60, 61, 62]);
+    expect(61 + close[1] - (60 + close[0])).toBeGreaterThanOrEqual(13);
+    expect(62 + close[2] - (61 + close[1])).toBeGreaterThanOrEqual(13);
   });
 
   it("preserves missing measurements and distinguishes an offline device from a fresh one", () => {
